@@ -147,6 +147,9 @@ subroutine startrun(infile,logfile,evfile,dumpfile)
  use extern_gr,        only:get_grforce_all
  use metric_tools,     only:init_metric,imet_minkowski,imetric
 #endif
+#ifdef SPLITTING
+ use split,            only:init_split
+#endif
 #ifdef PHOTO
  use photoevap,        only:set_photoevap_grid
 #endif
@@ -460,6 +463,13 @@ subroutine startrun(infile,logfile,evfile,dumpfile)
     !$omp end parallel do
     write(iprint,*) 'dt(extforce)  = ',dtextforce
  endif
+#endif
+
+!
+!--split particles as per their predefined regions
+!
+#ifdef SPLITTING
+ call init_split(ierr)
 #endif
 
 !

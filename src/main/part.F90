@@ -32,7 +32,7 @@ module part
                maxne,maxp_growth,maxdusttypes,maxdustsmall,maxdustlarge, &
                maxphase,maxgradh,maxan,maxdustan,maxmhdan,maxneigh,maxprad,maxsp,&
                maxTdust,store_dust_temperature,use_krome,maxp_krome, &
-               do_radiation,gr,maxgr,maxgran
+               do_radiation,gr,maxgr,maxgran,nsplittypes
  use dtypekdtree, only:kdnode
 #ifdef KROME
  use krome_user, only: krome_nmols
@@ -368,12 +368,15 @@ module part
  integer, parameter :: idustlast   = idust + maxdustlarge - 1
  integer, parameter :: idustbound  = idustlast + 1
  integer, parameter :: idustboundl = idustbound + maxdustlarge - 1
+ integer, parameter :: isplit      = idustboundl + 1
+ integer, parameter :: isplitlast  = isplit + nsplittypes - 1
  integer, parameter :: iunknown    = 0
  logical            :: set_boundaries_to_active = .true.
  integer :: i
  character(len=7), dimension(maxtypes), parameter :: &
    labeltype = (/'gas    ','empty  ','bound  ','star   ','darkm  ','bulge  ', &
-                 ('dust   ', i=idust,idustlast),('dustbnd',i=idustbound,idustboundl)/)
+                 ('dust   ', i=idust,idustlast),('dustbnd',i=idustbound,idustboundl), &
+                 ('split  ', i=isplit,isplitlast)/)
 !
 !--generic interfaces for routines
 !

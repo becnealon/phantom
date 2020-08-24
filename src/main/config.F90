@@ -193,9 +193,20 @@ module dim
  logical, parameter :: periodic = .false.
 #endif
 
+!--------------------
+! Particle splitting
+!--------------------
+#ifdef SPLITTING
+ logical, parameter :: split = .true.
+ integer, parameter :: nsplittypes = 3
+#else
+ logical, parameter :: split = .false.
+ integer, parameter :: nsplittypes = 0
+#endif
+
  ! Maximum number of particle types
  !
- integer, parameter :: maxtypes = 7 + 2*maxdustlarge - 1
+ integer, parameter :: maxtypes = 7 + 2*maxdustlarge - 1 + nsplittypes
 
  !
  ! Number of dimensions, where it is needed

@@ -88,6 +88,7 @@ LIBTOOL=libtool
 # -DNONIDEALMHD         ! non-ideal magnetic fields including ionisation; uses NICIL
 # -DPHOTO               ! turn on the photoevaporation
 # -DLIGHTCURVE          ! lightcurve estimation
+# -DSPLITTING           ! particle splitting for adaptive resolution
 #----------------------------------------------------------------
 #
 # Check for obsolete setups and replace with generic version
@@ -255,7 +256,8 @@ ifeq ($(SETUP), disc)
 #   locally isothermal gas disc
     DISC_VISCOSITY=yes
     SETUPFILE= setup_disc.f90
-    ANALYSIS= analysis_disc.f90
+    ANALYSIS= analysis_BHangle.f90
+    LIVE_ANALYSIS=yes
     ISOTHERMAL=yes
     KNOWN_SETUP=yes
     MULTIRUNFILE= multirun.f90
@@ -690,6 +692,8 @@ endif
 
 ifeq ($(SETUP), kh)
 #   Kelvin-Helmholtz problem
+    FPPFLAGS= -DSPLITTING
+    SPLITTING=yes
     PERIODIC=yes
     SETUPFILE= setup_kh.f90
     KNOWN_SETUP=yes
@@ -1436,6 +1440,11 @@ ifeq ($(GR), yes)
 ifeq ($(METRIC), kerr)
     FPPFLAGS += -DKERR
 endif
+
+ifeq ($(SPLITTING), yes)
+    FPPFLAGS += -DSPLITTING
+endif
+
 ifeq ($(ISENTROPIC), yes)
     FPPFLAGS += -DISENTROPIC
     FPPFLAGS += -DLIGHTCURVE
@@ -1722,6 +1731,12 @@ endif
    SRCPOT=extern_gr.F90 externalforces_gr.F90
 endif
 
+ifeq ($(SPLITTING), yes)
+   SRCSPLIT= utils_splitmerge.f90 splitting.f90
+else
+   SRCSPLIT=
+endif
+
 SRCCHEM= fs_data.f90 mol_data.f90 utils_spline.f90 h2cooling.f90 h2chem.f90 cooling.F90
 
 SRCMESA= eos_mesa_microphysics.F90 eos_mesa.f90
@@ -1751,7 +1766,7 @@ SOURCES= physcon.f90 ${CONFIG} ${SRCKERNEL} io.F90 units.f90 boundary.f90 \
          partinject.F90 utils_inject.f90 utils_filenames.f90 utils_summary.F90 ${SRCCHEM} \
          ${SRCDUST} dust_formation.F90 ptmass_radiation.F90 \
          mpi_dens.F90 mpi_force.F90 stack.F90 mpi_derivs.F90 kdtree.F90 linklist_kdtree.F90 ${SRCTURB} \
-         ${SRCNIMHD} ${SRCPHOTO} ${SRCINJECT} ${SRCKROME} memory.F90 ${SRCREADWRITE_DUMPS}  \
+         ${SRCNIMHD} ${SRCPHOTO} ${SRCINJECT} ${SRCKROME} ${SRCSPLIT} memory.F90 ${SRCREADWRITE_DUMPS}  \
          quitdump.f90 ptmass.F90 radiation_utils.f90 \
          readwrite_infile.F90 dens.F90 force.F90 utils_deriv.f90 deriv.F90 energies.F90 sort_particles.F90 \
          evwrite.F90 step_leapfrog.F90 writeheader.F90 ${SRCAN} step_supertimestep.F90 mf_write.f90 evolve.F90 \

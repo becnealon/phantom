@@ -1441,15 +1441,15 @@ ifeq ($(METRIC), kerr)
     FPPFLAGS += -DKERR
 endif
 
-ifeq ($(SPLITTING), yes)
-    FPPFLAGS += -DSPLITTING
-endif
-
 ifeq ($(ISENTROPIC), yes)
     FPPFLAGS += -DISENTROPIC
     FPPFLAGS += -DLIGHTCURVE
 endif
     CONST_AV=yes
+endif
+
+ifeq ($(SPLITTING), yes)
+    FPPFLAGS += -DSPLITTING
 endif
 
 ifeq ($(GWS), yes)

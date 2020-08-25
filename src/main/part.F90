@@ -823,9 +823,9 @@ pure integer(kind=1) function isetphase(itype,iactive)
 
 end function isetphase
 
-pure subroutine get_partinfo(iphasei,isactive,isgas,isdust,itype)
+pure subroutine get_partinfo(iphasei,isactive,isgas,isdust,issplit,itype)
  integer(kind=1), intent(in)  :: iphasei
- logical,         intent(out) :: isactive,isgas,isdust
+ logical,         intent(out) :: isactive,isgas,isdust,issplit
  integer,         intent(out) :: itype
 
 ! isactive = iactive(iphasei)
@@ -865,6 +865,14 @@ pure subroutine get_partinfo(iphasei,isactive,isgas,isdust,itype)
        isactive = .false.
     endif
  endif
+ !
+ ! split particles
+ !
+#ifdef SPLITTING
+  issplit = ((itype>=isplit) .and. (itype<=isplitlast))
+#else
+  issplit = .false.
+#endif
 
 end subroutine get_partinfo
 
@@ -914,6 +922,15 @@ pure elemental logical function iamboundary(itype)
  iamboundary = itype==iboundary .or. (itype>=idustbound .and. itype<=idustboundl)
 
 end function iamboundary
+
+pure elemental logical function iamsplit(iphasei)
+ integer(kind=1), intent(in) :: iphasei
+ integer :: itype
+
+ itype = iamtype(iphasei)
+ iamsplit = ((itype>=isplit) .and. (itype<=isplitlast))
+
+end function iamsplit
 
 pure elemental integer function ibasetype(itype)
  integer, intent(in) :: itype

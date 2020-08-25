@@ -237,7 +237,7 @@ subroutine force(icall,npart,xyzh,vxyzu,fxyzu,divcurlv,divcurlB,Bevol,dBevol,&
  logical :: use_part
  integer :: ipart_rhomax_thread,j,id_rhomax
  real    :: hi,pmassi,rhoi
- logical :: iactivei,iamdusti
+ logical :: iactivei,iamdusti,iamspliti
  integer :: iamtypei
 #endif
 #ifdef DUST
@@ -390,7 +390,7 @@ subroutine force(icall,npart,xyzh,vxyzu,fxyzu,divcurlv,divcurlB,Bevol,dBevol,&
 #ifdef GRAVITY
 !$omp shared(massoftype,npart,maxphase) &
 !$omp private(hi,pmassi,rhoi) &
-!$omp private(iactivei,iamdusti,iamtypei) &
+!$omp private(iactivei,iamdusti,iamspliti,iamtypei) &
 !$omp private(dx,dy,dz,poti,fxi,fyi,fzi,potensoft0,dum,epoti) &
 !$omp shared(xyzmh_ptmass,nptmass) &
 !$omp shared(rhomax,ipart_rhomax,icreate_sinks,rho_crit,r_crit2) &
@@ -814,8 +814,8 @@ end subroutine force
 !  MAKE SURE THIS ROUTINE IS INLINED BY THE COMPILER
 !+
 !----------------------------------------------------------------
-subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,gradsofti, &
-                          beta, &
+subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi41,&
+                          gradhi,gradsofti,beta, &
                           pmassi,listneigh,nneigh,xyzcache,fsum,vsigmax, &
                           ifilledcellcache,realviscosity,useresistiveheat, &
                           xyzh,vxyzu,Bevol,iphasei,iphase,massoftype, &
@@ -865,7 +865,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
 #endif
  use radiation_utils, only:get_rad_R
  integer,         intent(in)    :: i
- logical,         intent(in)    :: iamgasi,iamdusti
+ logical,         intent(in)    :: iamgasi,iamdusti,iamspliti
  real,            intent(in)    :: xpartveci(:)
  real(kind=8),    intent(in)    :: hi1,hi21,hi41,gradhi,gradsofti
  real,            intent(in)    :: hi,beta
@@ -898,7 +898,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
  logical,         intent(in)    :: ignoreself
  real,            intent(in)    :: rad(:,:),radprop(:,:),dens(:),metrics(:,:,:,:)
  integer :: j,n,iamtypej
- logical :: iactivej,iamgasj,iamdustj
+ logical :: iactivej,iamgasj,iamdustj,iamsplitj
  real    :: rij2,q2i,qi,xj,yj,zj,dx,dy,dz,runix,runiy,runiz,rij1,hfacgrkern
  real    :: grkerni,grgrkerni,dvx,dvy,dvz,projv,denij,vsigi,vsigu,dudtdissi
  real    :: projBi,projBj,dBx,dBy,dBz,dB2,projdB
@@ -1035,10 +1035,11 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
  iamtypei = iamtype(iphasei)
 
  ! default settings for active/phase if iphase not used
- iactivej = .true.
- iamtypej = igas
- iamgasj  = .true.
- iamdustj = .false.
+ iactivej  = .true.
+ iamtypej  = igas
+ iamgasj   = .true.
+ iamdustj  = .false.
+ iamsplitj = .false.
 
  ! to find max ibin of all of i's neighbours
  ibin_neighi = 0_1
@@ -1240,7 +1241,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
 
        !--get individual timestep/ multiphase information (querying iphase)
        if (maxphase==maxp) then
-          call get_partinfo(iphase(j),iactivej,iamgasj,iamdustj,iamtypej)
+          call get_partinfo(iphase(j),iactivej,iamgasj,iamdustj,iamsplitj,iamtypej)
 #ifdef IND_TIMESTEPS
           ! Particle j is a neighbour of an active particle;
           ! flag it to see if it needs to be woken up next step.
@@ -2102,7 +2103,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
  integer :: iregime
 #endif
 
- logical :: iactivei,iamgasi,iamdusti,realviscosity
+ logical :: iactivei,iamgasi,iamdusti,iamspliti,realviscosity
 
  realviscosity = (irealvisc > 0)
 
@@ -2115,12 +2116,13 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
     endif
 
     if (maxphase==maxp) then
-       call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
     if (.not.iactivei) then ! handles boundaries + case where first particle in cell is inactive
        cycle over_parts
@@ -2417,6 +2419,7 @@ subroutine compute_cell(cell,listneigh,nneigh,Bevol,xyzh,vxyzu,fxyzu, &
  logical                         :: iactivei
  logical                         :: iamgasi
  logical                         :: iamdusti
+ logical                         :: iamspliti
 
  logical                         :: realviscosity
  logical                         :: useresistiveheat
@@ -2430,12 +2433,13 @@ subroutine compute_cell(cell,listneigh,nneigh,Bevol,xyzh,vxyzu,fxyzu, &
  over_parts: do ip = 1,cell%npcell
 
     if (maxphase==maxp) then
-       call get_partinfo(cell%iphase(ip),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(cell%iphase(ip),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     if (.not.iactivei) then ! handles case where first particle in cell is inactive
@@ -2475,7 +2479,7 @@ subroutine compute_cell(cell,listneigh,nneigh,Bevol,xyzh,vxyzu,fxyzu, &
     ignoreself = .true.
 #endif
 
-    call compute_forces(i,iamgasi,iamdusti,cell%xpartvec(:,ip),hi,hi1,hi21,hi41,gradhi,gradsofti, &
+    call compute_forces(i,iamgasi,iamdusti,iamspliti,cell%xpartvec(:,ip),hi,hi1,hi21,hi41,gradhi,gradsofti, &
                          beta, &
                          pmassi,listneigh,nneigh,xyzcache,cell%fsums(:,ip),cell%vsigmax(ip), &
                          .true.,realviscosity,useresistiveheat, &
@@ -2606,7 +2610,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
  real    :: vsigdtc,dtc,dtf,dti,dtcool,dtdiffi,ts_min
  real    :: dtohmi,dtambii,dthalli,dtvisci,dtdrag,dtdusti,dtclean
  integer :: iamtypei
- logical :: iactivei,iamgasi,iamdusti,realviscosity
+ logical :: iactivei,iamgasi,iamdusti,iamspliti,realviscosity
 #ifdef IND_TIMESTEPS
  integer(kind=1)       :: ibin_neighi
  logical               :: allow_decrease,dtcheck
@@ -2629,12 +2633,13 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
  over_parts: do ip = 1,cell%npcell
 
     if (maxphase==maxp) then
-       call get_partinfo(cell%iphase(ip),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(cell%iphase(ip),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     if (.not.iactivei) then ! handles case where first particle in cell is inactive

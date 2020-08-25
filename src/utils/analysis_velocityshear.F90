@@ -58,7 +58,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  real, dimension(3)   :: eigen
  real, dimension(3,3) :: eigenvec, tensor
 
- logical :: iactivei, iamdusti,iamgasi
+ logical :: iactivei, iamdusti,iamgasi,iamspliti
  logical :: existneigh
 
  character(len=100) :: neighbourfile, valuefile, vectorfile
@@ -100,12 +100,13 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
     ! Only calculate for gas particles
 
     if (maxphase==maxp) then
-       call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     if (.not.iamgasi) cycle over_parts
@@ -182,7 +183,7 @@ subroutine calc_velocitysheartensor(ipart,tensor, xyzh,vxyzu)
  integer :: j,k, imat, jmat, iamtypei
  real    :: rij,rij2, hj1,hj21,hj41,q2i,qi
  real    :: rhoj, wabi, grkerni, dphidhi, grpmrho1
- logical :: iactivei,iamdusti, iamgasi
+ logical :: iactivei,iamdusti, iamgasi,iamspliti
 
  real, dimension(3) :: dr
 
@@ -193,12 +194,13 @@ subroutine calc_velocitysheartensor(ipart,tensor, xyzh,vxyzu)
     j = neighb(ipart,k)
 
     if (maxphase==maxp) then
-       call get_partinfo(iphase(j),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(iphase(j),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     if (ipart==j) cycle

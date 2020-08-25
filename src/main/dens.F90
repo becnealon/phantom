@@ -170,7 +170,7 @@ subroutine densityiterate(icall,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol
  integer :: nwarnup,nwarndown,nwarnroundoff
 
  logical :: getdv,realviscosity,getdB,converged
- logical :: iactivei,iamgasi,iamdusti
+ logical :: iactivei,iamgasi,iamdusti,iamspliti
  integer :: iamtypei
 
  logical :: remote_export(nprocs)
@@ -284,6 +284,7 @@ subroutine densityiterate(icall,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol
 !$omp private(iamtypei) &
 !$omp private(iactivei) &
 !$omp private(iamdusti) &
+!$omp private(iamspliti) &
 !$omp private(converged) &
 !$omp private(redo_neighbours) &
 !$omp reduction(+:ncalc) &
@@ -585,7 +586,7 @@ end subroutine densityiterate
 !+
 !----------------------------------------------------------------
 pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdusti,&
-                                 listneigh,nneigh,nneighi,dxcache,xyzcache,rhosum,&
+                                 iamspliti,listneigh,nneigh,nneighi,dxcache,xyzcache,rhosum,&
                                  ifilledcellcache,ifilledneighcache,getdv,getdB,&
                                  realviscosity,xyzh,vxyzu,Bevol,fxyzu,fext,ignoreself,&
                                  rad)
@@ -602,7 +603,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
  real,         intent(in)    :: xpartveci(:)
  real(kind=8), intent(in)    :: hi,hi1,hi21
  integer,      intent(in)    :: iamtypei
- logical,      intent(in)    :: iamgasi,iamdusti
+ logical,      intent(in)    :: iamgasi,iamdusti,iamspliti
  integer,      intent(in)    :: listneigh(:)
  integer,      intent(in)    :: nneigh
  integer,      intent(out)   :: nneighi
@@ -1278,7 +1279,7 @@ pure subroutine compute_cell(cell,listneigh,nneigh,getdv,getdB,Bevol,xyzh,vxyzu,
  real(kind=8)                    :: hi1,hi21,hi31,hi41
 
  integer                         :: iamtypei
- logical                         :: iactivei,iamgasi,iamdusti
+ logical                         :: iactivei,iamgasi,iamdusti,iamspliti
 
  logical                         :: realviscosity
  logical                         :: ignoreself
@@ -1291,7 +1292,7 @@ pure subroutine compute_cell(cell,listneigh,nneigh,getdv,getdB,Bevol,xyzh,vxyzu,
     lli = inodeparts(cell%arr_index(i))
     ! note: only active particles have been sent here
     if (maxphase==maxp) then
-       call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
        iactivei = .true.
        iamtypei = igas
@@ -1314,7 +1315,7 @@ pure subroutine compute_cell(cell,listneigh,nneigh,getdv,getdB,Bevol,xyzh,vxyzu,
     ignoreself = .true.
 #endif
     call get_density_sums(lli,cell%xpartvec(:,i),hi,hi1,hi21,iamtypei,iamgasi,iamdusti,&
-                          listneigh,nneigh,nneighi,dxcache,xyzcache,cell%rhosums(:,i),&
+                          iamspliti,listneigh,nneigh,nneighi,dxcache,xyzcache,cell%rhosums(:,i),&
                           .true.,.false.,getdv,getdB,realviscosity,&
                           xyzh,vxyzu,Bevol,fxyzu,fext,ignoreself,rad)
 
@@ -1362,7 +1363,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,fxyzu,fext,Bevol,rad)
 
  integer :: i,ip
  integer :: iamtypei
- logical :: iactivei,iamgasi,iamdusti
+ logical :: iactivei,iamgasi,iamdusti,iamspliti
 
  cell%npcell = 0
  over_parts: do ip = inoderange(1,cell%icell),inoderange(2,cell%icell)
@@ -1373,12 +1374,13 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,fxyzu,fext,Bevol,rad)
     endif
 
     if (maxphase==maxp) then
-       call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
     if (.not.iactivei) then ! skip boundary particles + inactive particles
        cycle over_parts
@@ -1441,7 +1443,7 @@ subroutine finish_cell(cell,cell_converged)
  real                           :: func,dfdh1,hi,hi_old,hnew
  real                           :: pmassi, xyzh(4)
  integer                        :: i,iamtypei !,nwarnup,nwarndown
- logical                        :: iactivei,iamgasi,iamdusti,converged
+ logical                        :: iactivei,iamgasi,iamdusti,iamspliti,converged
 
  cell%nits = cell%nits + 1
  cell_converged = .true.
@@ -1451,7 +1453,7 @@ subroutine finish_cell(cell,cell_converged)
     rhosum = cell%rhosums(:,i)
 
     if (maxphase==maxp) then
-       call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
        iactivei = .true.
        iamtypei = igas
@@ -1603,7 +1605,7 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
  real         :: rhosum(maxrhosum)
 
  integer      :: iamtypei,i,lli,ierr,l
- logical      :: iactivei,iamgasi,iamdusti
+ logical      :: iactivei,iamgasi,iamdusti,iamspliti
  logical      :: igotrmatrix,igotspsound
  real         :: hi,hi1,hi21,hi31,hi41
  real         :: pmassi,rhoi
@@ -1630,7 +1632,7 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
     hi41  = hi21*hi21
 
     if (maxphase==maxp) then
-       call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
        iactivei = .true.
        iamtypei = igas

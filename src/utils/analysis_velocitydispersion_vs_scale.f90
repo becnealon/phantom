@@ -74,7 +74,7 @@ subroutine do_analysis(dumpfile,numfile,xyzh,vxyzu,pmass,npart,time,iunit)
  integer :: j,k,l, ipart,jpart,iscale,ncalculated,iamtypei
  real :: percent, percentcount,vmeansum,vdispsum,dv
  real :: pmassi, rhoj,rhoj1
- logical :: existneigh, iactivei,iamdusti,iamgasi
+ logical :: existneigh, iactivei,iamdusti,iamgasi,iamspliti
 
 ! Print the analysis being done
  write(*,'("Performing analysis type ",A)') analysistype
@@ -121,12 +121,13 @@ subroutine do_analysis(dumpfile,numfile,xyzh,vxyzu,pmass,npart,time,iunit)
 
  do ipart=1,npart
     if (maxphase==maxp) then
-       call get_partinfo(iphase(ipart), iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(iphase(ipart), iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamdusti = .false.
-       iamgasi = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamdusti  = .false.
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     if (.not.iamgasi) cycle

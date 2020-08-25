@@ -853,7 +853,7 @@ subroutine ptmass_create(nptmass,npart,itest,xyzh,vxyzu,fxyzu,fext,divcurlv,pote
  real    :: q2i,qi,psofti,psoftj,psoftk,fsoft,epot_mass,epot_rad,pmassgas1
  real(4) :: divvi,potenj_min,poteni
  integer :: ifail,nacc,j,k,n,nk,itype,itypej,itypek,ifail_array(inosink_max),id_rhomax
- logical :: accreted,iactivej,isgasj,isdustj,calc_exact_epot
+ logical :: accreted,iactivej,isgasj,isdustj,issplitj,calc_exact_epot
 
  ifail       = 0
  ifail_array = 0
@@ -981,7 +981,7 @@ subroutine ptmass_create(nptmass,npart,itest,xyzh,vxyzu,fxyzu,fext,divcurlv,pote
 !$omp shared(ibin_wake,ibin_itest) &
 #endif
 !$omp private(n,j,xj,yj,zj,hj1,hj21,psoftj,rij2,nk,k,xk,yk,zk,hk1,psoftk,rjk2,psofti,rik2) &
-!$omp private(dx,dy,dz,dvx,dvy,dvz,dv2,isgasj,isdustj) &
+!$omp private(dx,dy,dz,dvx,dvy,dvz,dv2,isgasj,isdustj,issplitj) &
 !$omp private(rhoj,ponrhoj,spsoundj,q2i,qi,fsoft,rcrossvx,rcrossvy,rcrossvz,radxy2,radyz2,radxz2) &
 !$omp firstprivate(pmassj,pmassk,itypej,iactivej,itypek) &
 !$omp reduction(+:ekin,erotx,eroty,erotz,etherm,epot,epot_mass,epot_rad) &
@@ -992,7 +992,7 @@ subroutine ptmass_create(nptmass,npart,itest,xyzh,vxyzu,fxyzu,fext,divcurlv,pote
     !
     ! get mass and particle type to immediately determine if active and accretable
     if (maxphase==maxp) then
-       call get_partinfo(iphase(j),iactivej,isgasj,isdustj,itypej)
+       call get_partinfo(iphase(j),iactivej,isgasj,isdustj,issplitj,itypej)
        pmassj = massoftype(itypej)
        if (.not. is_accretable(itypej) ) cycle over_neigh ! Verify particle is 'accretable'
     endif

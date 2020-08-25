@@ -73,7 +73,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  integer, allocatable,dimension(:) :: neighclump, ipotensort
  integer            :: k,l,iclump,ipart,jpart,iamtypei,deletedclumps
  real               :: percent,percentcount,rhomin
- logical            :: existneigh,iactivei,iamdusti,iamgasi
+ logical            :: existneigh,iactivei,iamdusti,iamgasi,iamspliti
  logical            :: write_raw_data,write_neighbour_list,fexists
  character(len=100) :: neighbourfile
  character(len=100) :: fmt
@@ -218,7 +218,7 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
 
     ! Only calculate for gas particles
     if (maxphase==maxp) then
-       call get_partinfo(iphase(ipart),iactivei,iamgasi,iamdusti,iamtypei)
+       call get_partinfo(iphase(ipart),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
        ! If particle isn't a gas particle, skip it
        if (.not.iamgasi) cycle over_parts
     endif

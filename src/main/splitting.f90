@@ -33,11 +33,12 @@ contains
 !----------------------------------------------------------------
 subroutine init_split(ierr)
  use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,&
-                massoftype,igas,isplit,npart
+                massoftype,igas,isplit,npart,iamtype,iamsplit,iphase
  use splitmergeutils, only:split_a_particle
  integer, intent(inout) :: ierr
  integer :: ii,jj,ichild
- logical :: split_it
+ logical :: split_it,already_split
+ integer(kind=1) :: iphaseii
 
 ierr = 0
 
@@ -45,9 +46,10 @@ ierr = 0
 ichild = npart
 massoftype(isplit+1) = massoftype(igas)/nchild
 do ii = 1,npart
-  call check_should_split(xyzh(1:3,ii),split_it)
-  if (split_it) then
-    print*,'splitting',ii
+  call inside_boundary(xyzh(1:3,ii),split_it)
+  iphaseii = iphase(ii)
+  already_split = iamsplit(iphaseii)
+  if (split_it .and. .not.already_split) then
     npart = npart + nchild - 1
     npartoftype(igas) = npartoftype(igas) - 1
     npartoftype(isplit+1) = npartoftype(isplit+1) + nchild
@@ -77,13 +79,13 @@ end subroutine init_split
 ! do either rectangles or circles
 !+
 !----------------------------------------------------------------
-subroutine check_should_split(pos,should_split)
+subroutine inside_boundary(pos,should_split)
   real, intent(in)     :: pos(3)
   logical, intent(out) :: should_split
 
   should_split = .false.
-  if (pos(2) > 0.5) should_split = .true.
+  if (pos(2) > 0.5 .and. pos(2) < 0.8) should_split = .true.
 
-end subroutine check_should_split
+end subroutine inside_boundary
 
 end module split

@@ -59,7 +59,7 @@ module readwrite_infile
 ! :Dependencies: cooling, damping, dim, dust, dust_formation, eos,
 !   externalforces, forcing, growth, infile_utils, inject, io, linklist,
 !   metric, nicil_sup, options, part, photoevap, ptmass, ptmass_radiation,
-!   timestep, viscosity
+!   timestep, viscosity,splitting
 !
  use timestep,  only:dtmax_dratio,dtmax_max,dtmax_min
  use options,   only:nfulldump,nmaxdumps,twallmax,iexternalforce,idamp,tolh, &
@@ -67,7 +67,7 @@ module readwrite_infile
                      ipdv_heating,ishock_heating,iresistive_heating, &
                      icooling,psidecayfac,overcleanfac,hdivbbmax_max,alphamax,calc_erot,rhofinal_cgs, &
                      use_mcfost, use_Voronoi_limits_file, Voronoi_limits_file, use_mcfost_stellar_parameters,&
-                     exchange_radiation_energy,limit_radiation_flux
+                     exchange_radiation_energy,limit_radiation_flux,isplitboundary
  use timestep,  only:dtwallmax,tolv,xtol,ptol
  use viscosity, only:irealvisc,shearparam,bulkvisc
  use part,      only:hfact
@@ -107,6 +107,9 @@ subroutine write_infile(infile,logfile,evfile,dumpfile,iwritein,iprint)
 #ifdef INJECT_PARTICLES
  use inject,          only:write_options_inject
  use dust_formation,  only:write_options_dust_formation
+#endif
+#ifdef SPLITTING
+use split,            only:write_options_splitting
 #endif
 #ifdef NONIDEALMHD
  use nicil_sup,       only:write_options_nicil
@@ -257,6 +260,10 @@ subroutine write_infile(infile,logfile,evfile,dumpfile,iwritein,iprint)
 #endif
  call write_inopt(rkill,'rkill','deactivate particles outside this radius (<0 is off)',iwritein)
 
+#ifdef SPLITTING
+ call write_options_splitting(iwritein,isplitboundary)
+#endif
+
  if (sink_radiation) then
     write(iwritein,"(/,a)") '# options controling radiation pressure from sink particles'
     call write_options_ptmass_radiation(iwritein)
@@ -312,6 +319,9 @@ subroutine read_infile(infile,logfile,evfile,dumpfile)
  use inject,          only:read_options_inject
  use dust_formation,  only:read_options_dust_formation,idust_opacity
 #endif
+#ifdef SPLITTING
+ use split,           only:read_options_splitting
+#endif
 #ifdef NONIDEALMHD
  use nicil_sup,       only:read_options_nicil
 #endif
@@ -332,7 +342,7 @@ subroutine read_infile(infile,logfile,evfile,dumpfile)
  logical :: imatch,igotallrequired,igotallturb,igotalllink,igotloops
  logical :: igotallbowen,igotallcooling,igotalldust,igotallextern,igotallinject,igotallgrowth
  logical :: igotallionise,igotallnonideal,igotalleos,igotallptmass,igotallphoto,igotalldamping
- logical :: igotallprad,igotalldustform
+ logical :: igotallprad,igotalldustform,igotallsplit
  integer, parameter :: nrequired = 1
 
  ireaderr = 0
@@ -350,6 +360,7 @@ subroutine read_infile(infile,logfile,evfile,dumpfile)
  igotalllink     = .true.
  igotallextern   = .true.
  igotallinject   = .true.
+ igotallsplit    = .true.
  igotalleos      = .true.
  igotallcooling  = .true.
  igotalldamping  = .true.
@@ -503,6 +514,9 @@ subroutine read_infile(infile,logfile,evfile,dumpfile)
        if (.not.imatch) call read_options_inject(name,valstring,imatch,igotallinject,ierr)
        if (.not.imatch) call read_options_dust_formation(name,valstring,imatch,igotalldustform,ierr)
 #endif
+#ifdef SPLITTING
+       if (.not.imatch) call read_options_splitting(name,valstring,imatch,igotallsplit,ierr,isplitboundary)
+#endif
        if (.not.imatch .and. sink_radiation) then
           call read_options_ptmass_radiation(name,valstring,imatch,igotallprad,ierr)
        endif
@@ -535,7 +549,7 @@ subroutine read_infile(infile,logfile,evfile,dumpfile)
                     .and. igotalleos    .and. igotallcooling .and. igotallextern  .and. igotallturb &
                     .and. igotallptmass .and. igotallinject  .and. igotallionise  .and. igotallnonideal &
                     .and. igotallphoto  .and. igotallgrowth  .and. igotalldamping .and. igotallprad &
-                    .and. igotalldustform
+                    .and. igotalldustform .and. igotallsplit
 
  if (ierr /= 0 .or. ireaderr > 0 .or. .not.igotallrequired) then
     ierr = 1
@@ -556,6 +570,7 @@ subroutine read_infile(infile,logfile,evfile,dumpfile)
           if (.not.igotallphoto) write(*,*) 'missing photoevaporation options'
           if (.not.igotallextern) write(*,*) 'missing external force options'
           if (.not.igotallinject) write(*,*) 'missing inject-particle options'
+          if (.not.igotallsplit) write(*,*) 'missing particle splitting options'
           if (.not.igotallionise) write(*,*) 'missing ionisation options'
           if (.not.igotallnonideal) write(*,*) 'missing non-ideal MHD options'
           if (.not.igotallturb) write(*,*) 'missing turbulence-driving options'

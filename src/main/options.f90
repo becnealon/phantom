@@ -27,7 +27,7 @@ module options
 ! and read from the input file
 !
  real, public :: avdecayconst
- integer, public :: nfulldump,nmaxdumps,iexternalforce,idamp
+ integer, public :: nfulldump,nmaxdumps,iexternalforce,idamp,isplitboundary
  real, public :: tolh,damp,rkill
  real(kind=4), public :: twallmax
 
@@ -87,6 +87,7 @@ subroutine set_default_options
  idamp     = 0               ! damping type
  iexternalforce = 0          ! external forces
  if (gr) iexternalforce = 1
+ isplitboundary = 1          ! particle splitting
  calc_erot = .false.         ! To allow rotational energies to be printed to .ev
  rhofinal_cgs = 0.           ! Final maximum density (0 == ignored)
 

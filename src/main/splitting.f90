@@ -76,9 +76,8 @@ end subroutine init_split
 
 !----------------------------------------------------------------
 !+
-!  determines whether the particle should be split or not
-! TODO: make fancier, take in parameters from *.in file and
-! do either rectangles or circles
+!  determines whether the particle is inside boundary and thus
+!  should be split
 !+
 !----------------------------------------------------------------
 subroutine inside_boundary(pos,should_split)

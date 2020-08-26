@@ -368,15 +368,16 @@ module part
  integer, parameter :: idustlast   = idust + maxdustlarge - 1
  integer, parameter :: idustbound  = idustlast + 1
  integer, parameter :: idustboundl = idustbound + maxdustlarge - 1
- integer, parameter :: isplit      = idustboundl + 1
- integer, parameter :: isplitlast  = isplit + nsplittypes - 1
+ integer, parameter :: ighost      = idustboundl + 1
+ integer, parameter :: isplit      = ighost + 1
+ integer, parameter :: isplitghost = isplit + 1
  integer, parameter :: iunknown    = 0
  logical            :: set_boundaries_to_active = .true.
  integer :: i
  character(len=7), dimension(maxtypes), parameter :: &
    labeltype = (/'gas    ','empty  ','bound  ','star   ','darkm  ','bulge  ', &
                  ('dust   ', i=idust,idustlast),('dustbnd',i=idustbound,idustboundl), &
-                 ('split  ', i=isplit,isplitlast)/)
+                  'ghost  ','split  ','splitg '/)
 !
 !--generic interfaces for routines
 !
@@ -869,7 +870,7 @@ pure subroutine get_partinfo(iphasei,isactive,isgas,isdust,issplit,itype)
  ! split particles
  !
 #ifdef SPLITTING
-  issplit = ((itype>=isplit) .and. (itype<=isplitlast))
+  issplit = ((itype==isplit) .or. (itype==isplitghost))
 #else
   issplit = .false.
 #endif
@@ -928,9 +929,18 @@ pure elemental logical function iamsplit(iphasei)
  integer :: itype
 
  itype = iamtype(iphasei)
- iamsplit = ((itype>=isplit) .and. (itype<=isplitlast))
+ iamsplit = ((itype==isplit) .or. (itype==isplitghost))
 
 end function iamsplit
+
+pure elemental logical function iamghost(iphasei)
+ integer(kind=1), intent(in) :: iphasei
+ integer :: itype
+
+ itype = iamtype(iphasei)
+ iamghost = ((itype==ighost) .or. (itype==isplitghost))
+
+end function iamghost
 
 pure elemental integer function ibasetype(itype)
  integer, intent(in) :: itype
@@ -942,6 +952,10 @@ pure elemental integer function ibasetype(itype)
     ibasetype = igas                       ! boundary particles are gas
  elseif (itype>=idustbound .and. itype<=idustboundl) then
     ibasetype = idust + (itype-idustbound) ! dust boundaries are dust
+ elseif (itype==ighost) then
+   ibasetype = igas                        ! ghost particles are gas
+ elseif (itype==isplit .or. itype==isplitghost) then
+   ibasetype = isplit                      ! split particles
  else
     ibasetype = itype                      ! otherwise same as current type
  endif

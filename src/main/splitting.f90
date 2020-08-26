@@ -24,7 +24,7 @@ module split
  private
 
  integer      :: nchild = 12
- real, public :: splitrad, splitbox(4)
+ real, public :: splitrad,splitbox(4),gzw
 
 contains
 
@@ -35,35 +35,37 @@ contains
 !----------------------------------------------------------------
 subroutine init_split(ierr)
  use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,&
-                massoftype,igas,isplit,npart,iamtype,iamsplit,iphase
+                massoftype,igas,isplit,npart,iamtype,iamsplit,iphase,ighost,&
+                iamghost,isplitghost,copy_particle
  use splitmergeutils, only:split_a_particle
  integer, intent(inout) :: ierr
- integer :: ii,jj,ichild
- logical :: split_it,already_split
+ integer :: ii,jj,ichild,merge_count,iighost
+ logical :: split_it,already_split,already_ghost,ghost_it
  integer(kind=1) :: iphaseii
 
 ierr = 0
 
 ! split particles that are "inside" the high res boundary
 ichild = npart
-massoftype(isplit+1) = massoftype(igas)/nchild
+massoftype(isplit) = massoftype(igas)/nchild
 do ii = 1,npart
   call inside_boundary(xyzh(1:3,ii),split_it)
   iphaseii = iphase(ii)
   already_split = iamsplit(iphaseii)
   if (split_it .and. .not.already_split) then
+    ! make space for new particles (stored after existing)
     npart = npart + nchild - 1
     npartoftype(igas) = npartoftype(igas) - 1
-    npartoftype(isplit+1) = npartoftype(isplit+1) + nchild
+    npartoftype(isplit) = npartoftype(isplit) + nchild
 
     call split_a_particle(nchild,ii,xyzh,vxyzu,0,1,ichild)
 
     ! replace the parent
-    call set_particle_type(ii,isplit+1)
+    call set_particle_type(ii,isplit)
 
     ! set the children
     do jj = 1,nchild-1
-      call set_particle_type(ichild+jj,isplit+1)
+      call set_particle_type(ichild+jj,isplit)
     enddo
 
     ichild = ichild + nchild - 1
@@ -71,6 +73,46 @@ do ii = 1,npart
 enddo
 
 npart = ichild
+
+! Set up some ghosts - separate for now but should be integrated into above loop?
+! Or by itself when no individual time-steps
+massoftype(ighost) = massoftype(igas)
+massoftype(isplitghost) = massoftype(isplit)
+iighost = npart
+merge_count = 0
+do ii = 1,npart
+  call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
+  call inside_boundary(xyzh(1:3,ii),split_it)
+  iphaseii = iphase(ii)
+  already_ghost = iamghost(iphaseii)
+  if (ghost_it .and. .not.already_ghost) then
+    if (split_it) then ! this is inside the boundary and should be merged
+      merge_count = merge_count + 1
+      if (merge_count == nchild) then ! the lucky one that becomes a parent
+        iighost = iighost + 1
+        call copy_particle(ii,iighost)
+        npartoftype(ighost) = npartoftype(ighost) + 1
+        npart = npart + 1
+        call set_particle_type(iighost,ighost)
+        xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
+        merge_count = 0
+      endif
+    else             ! this is outside the boundary and should be split
+      iighost = iighost + 1
+      call copy_particle(ii,iighost)
+      call split_a_particle(nchild,iighost,xyzh,vxyzu, &
+                 0,1,iighost)
+      do jj = 0,nchild
+        call set_particle_type(iighost+jj,isplitghost)
+      enddo
+      npartoftype(isplitghost) = npartoftype(isplitghost) + nchild
+      npart = npart + nchild
+      iighost = iighost + nchild - 1
+    endif
+  endif
+enddo
+
+print*,'particle splitting is on, you now have',npart,'total particles'
 
 end subroutine init_split
 
@@ -96,6 +138,38 @@ subroutine inside_boundary(pos,should_split)
 
 end subroutine inside_boundary
 
+!----------------------------------------------------------------
+!+
+!  determines whether the particle is inside region where ghosts
+!  should exist
+!+
+!----------------------------------------------------------------
+subroutine inside_ghost_zone(pos,should_ghost)
+  real, intent(in)     :: pos(3)
+  logical, intent(out) :: should_ghost
+  real :: rad2
+  logical :: in_big_box,in_small_box
+
+  should_ghost = .false.
+  in_big_box = .false.
+  in_small_box = .false.
+  if (isplitboundary == 0) then !circle
+    rad2 = dot_product(pos,pos)
+    if (rad2 < (splitrad+gzw)**2 .and. &
+        rad2 > (splitrad-gzw)**2) should_ghost = .true.
+  else                         !rectangle box
+    if (pos(1) > (splitbox(3)-gzw) .and. pos(1) < (splitbox(1)+gzw) .and. &
+        pos(2) > (splitbox(4)-gzw) .and. pos(2) < (splitbox(2)+gzw)) in_big_box=.true.
+    if (pos(1) > (splitbox(3)+gzw) .and. pos(1) < (splitbox(1)-gzw) .and. &
+        pos(2) > (splitbox(4)+gzw) .and. pos(2) < (splitbox(2)-gzw)) in_small_box=.true.
+    if (in_big_box .and. .not.in_small_box) should_ghost = .true.
+  endif
+
+!print*,should_ghost,in_big_box,in_small_box,pos(1:2)
+!read*
+
+end subroutine inside_ghost_zone
+
 !-----------------------------------------------------------------------
 !+
 !  Writes input options to the input file.
@@ -109,6 +183,7 @@ subroutine write_options_splitting(iunit,isplitboundary)
 
  !call get_optstring(iboundarytype,boundarytype,string,4)
  call write_inopt(isplitboundary,'boundary type','particles are split inside here, 0: circle, 1: rectangle',iunit)
+ call write_inopt(gzw,'boundary width','width of boundary for ghosts in code units',iunit)
 
  select case(isplitboundary)
  case(0)
@@ -148,6 +223,9 @@ subroutine read_options_splitting(name,valstring,imatch,igotall,ierr,isplitbound
     read(valstring,*,iostat=ierr) isplitboundary
     ngot = ngot + 1
     if (isplitboundary  <  0 .or. isplitboundary > 2) call fatal(label,'silly choice of isplitboundary in input options')
+ case('boundary width')
+    read(valstring,*,iostat=ierr) gzw
+    ngot = ngot + 1
  case default
     imatch = .false.
     select case(isplitboundary)

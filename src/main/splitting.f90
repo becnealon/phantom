@@ -85,6 +85,7 @@ do ii = 1,npart
   call inside_boundary(xyzh(1:3,ii),split_it)
   iphaseii = iphase(ii)
   already_ghost = iamghost(iphaseii)
+  already_split = iamsplit(iphaseii)
   if (ghost_it .and. .not.already_ghost) then
     if (split_it) then ! this is inside the boundary and should be merged
       merge_count = merge_count + 1
@@ -97,7 +98,7 @@ do ii = 1,npart
         xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
         merge_count = 0
       endif
-    else             ! this is outside the boundary and should be split
+    else if (.not.already_split) then     ! this is outside the boundary and should be split
       iighost = iighost + 1
       call copy_particle(ii,iighost)
       call split_a_particle(nchild,iighost,xyzh,vxyzu, &

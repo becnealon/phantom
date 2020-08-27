@@ -37,7 +37,7 @@ subroutine init_split(ierr)
  use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,&
                 massoftype,igas,isplit,npart,iamtype,iamsplit,iphase,ighost,&
                 iamghost,isplitghost,copy_particle
- use splitmergeutils, only:split_a_particle
+ use splitmergeutils, only:split_a_particle,make_a_ghost,make_split_ghost
  integer, intent(inout) :: ierr
  integer :: ii,jj,ichild,merge_count,iighost
  logical :: split_it,already_split,already_ghost,ghost_it
@@ -91,24 +91,12 @@ do ii = 1,npart
       merge_count = merge_count + 1
       if (merge_count == nchild) then ! the lucky one that becomes a parent
         iighost = iighost + 1
-        call copy_particle(ii,iighost)
-        npartoftype(ighost) = npartoftype(ighost) + 1
-        npart = npart + 1
-        call set_particle_type(iighost,ighost)
-        xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
+        call make_a_ghost(iighost,ii,npartoftype,npart,nchild,xyzh)
         merge_count = 0
       endif
     else if (.not.already_split) then     ! this is outside the boundary and should be split
-      iighost = iighost + 1
-      call copy_particle(ii,iighost)
-      call split_a_particle(nchild,iighost,xyzh,vxyzu, &
-                 0,1,iighost)
-      do jj = 0,nchild
-        call set_particle_type(iighost+jj,isplitghost)
-      enddo
-      npartoftype(isplitghost) = npartoftype(isplitghost) + nchild
-      npart = npart + nchild
-      iighost = iighost + nchild - 1
+      call make_split_ghost(iighost+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
+      iighost = iighost + nchild
     endif
   endif
 enddo

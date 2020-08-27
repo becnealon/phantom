@@ -216,4 +216,46 @@ subroutine fast_merge_into_a_particle(nchild,ichildren,mchild,npart, &
 
 end subroutine fast_merge_into_a_particle
 
+!-----------------------------------------------------------------------
+!+
+! make a new ghost particle from an existing particle
+!+
+!-----------------------------------------------------------------------
+subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh)
+  use part, only:copy_particle,set_particle_type,ighost
+  integer, intent(in)    :: iighost,nchild,ireal
+  integer, intent(inout) :: npartoftype(:),npart
+  real, intent(inout)    :: xyzh(:,:)
+
+  call copy_particle(ireal,iighost)
+  npartoftype(ighost) = npartoftype(ighost) + 1
+  npart = npart + 1
+  call set_particle_type(iighost,ighost)
+  xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
+
+end subroutine make_a_ghost
+
+!-----------------------------------------------------------------------
+!+
+! makes split ghost particles from an existing particle
+!+
+!-----------------------------------------------------------------------
+subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
+  use part, only:copy_particle,set_particle_type,isplitghost
+  integer, intent(in)    :: iighost,nchild,ireal
+  integer, intent(inout) :: npartoftype(:),npart
+  real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
+  integer :: jj
+
+  call copy_particle(ireal,iighost)
+  call split_a_particle(nchild,iighost,xyzh,vxyzu, &
+             0,1,iighost)
+  do jj = 0,nchild
+    call set_particle_type(iighost+jj,isplitghost)
+  enddo
+  npartoftype(isplitghost) = npartoftype(isplitghost) + nchild
+  npart = npart + nchild
+
+end subroutine make_split_ghost
+
 end module splitmergeutils

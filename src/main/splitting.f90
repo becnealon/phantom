@@ -17,6 +17,8 @@ module split
 ! :Dependencies: splitutils,options
 !
  use options, only:isplitboundary
+ use splitmergeutils
+
  implicit none
 
  public :: init_split,write_options_splitting,read_options_splitting
@@ -37,17 +39,21 @@ subroutine init_split(ierr)
  use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,&
                 massoftype,igas,isplit,npart,iamtype,iamsplit,iphase,ighost,&
                 iamghost,isplitghost,copy_particle
- use splitmergeutils, only:split_a_particle,make_a_ghost,make_split_ghost
  integer, intent(inout) :: ierr
- integer :: ii,jj,ichild,merge_count,iighost
- logical :: split_it,already_split,already_ghost,ghost_it
+ integer :: ii,jj,ichild,merge_count,children_list(nchild)
+ logical :: split_it,already_split
  integer(kind=1) :: iphaseii
 
 ierr = 0
 
+! if re-starting
+call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
+
 ! split particles that are "inside" the high res boundary
 ichild = npart
 massoftype(isplit) = massoftype(igas)/nchild
+merge_count = 0
+children_list = 0
 do ii = 1,npart
   call inside_boundary(xyzh(1:3,ii),split_it)
   iphaseii = iphase(ii)
@@ -67,39 +73,28 @@ do ii = 1,npart
     do jj = 1,nchild-1
       call set_particle_type(ichild+jj,isplit)
     enddo
-
     ichild = ichild + nchild - 1
-  endif
-enddo
 
-npart = ichild
-
-! Set up some ghosts - separate for now but should be integrated into above loop?
-! Or by itself when no individual time-steps
-massoftype(ighost) = massoftype(igas)
-massoftype(isplitghost) = massoftype(isplit)
-iighost = npart
-merge_count = 0
-do ii = 1,npart
-  call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
-  call inside_boundary(xyzh(1:3,ii),split_it)
-  iphaseii = iphase(ii)
-  already_ghost = iamghost(iphaseii)
-  already_split = iamsplit(iphaseii)
-  if (ghost_it .and. .not.already_ghost) then
-    if (split_it) then ! this is inside the boundary and should be merged
-      merge_count = merge_count + 1
-      if (merge_count == nchild) then ! the lucky one that becomes a parent
-        iighost = iighost + 1
-        call make_a_ghost(iighost,ii,npartoftype,npart,nchild,xyzh)
-        merge_count = 0
-      endif
-    else if (.not.already_split) then     ! this is outside the boundary and should be split
-      call make_split_ghost(iighost+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
-      iighost = iighost + nchild
+  else if (.not.split_it .and. already_split) then
+    merge_count = merge_count + 1
+    children_list(merge_count) = ii
+    if (merge_count == nchild) then
+      call fast_merge_into_a_particle(nchild,children_list,npart, &
+                                      xyzh,vxyzu,npartoftype,ii)
+      call set_particle_type(ii,igas)
+      npartoftype(igas) = npartoftype(igas) + 1
+      npartoftype(isplit) = npartoftype(isplit) - nchild
+      ichild = ichild - nchild + 1
+      merge_count = 0
     endif
   endif
 enddo
+npart = ichild
+
+! make the ghosts
+massoftype(ighost) = massoftype(igas)
+massoftype(isplitghost) = massoftype(isplit)
+call make_all_ghosts(npart,npartoftype,nchild,xyzh,vxyzu)
 
 print*,'particle splitting is on, you now have',npart,'total particles'
 
@@ -154,10 +149,69 @@ subroutine inside_ghost_zone(pos,should_ghost)
     if (in_big_box .and. .not.in_small_box) should_ghost = .true.
   endif
 
-!print*,should_ghost,in_big_box,in_small_box,pos(1:2)
-!read*
 
 end subroutine inside_ghost_zone
+
+!-----------------------------------------------------------------------
+!+
+! identifies and kills all ghosts and splitghosts
+!+
+!-----------------------------------------------------------------------
+subroutine delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
+  use part, only:iamghost,isplitghost,kill_particle,iphase, &
+                 delete_dead_or_accreted_particles,shuffle_part
+  integer, intent(inout) :: npartoftype(:),npart
+  real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
+  integer :: ii
+
+  do ii = 1,npart
+    if (iamghost(iphase(ii))) then
+      call kill_particle(ii,npartoftype)
+    endif
+  enddo
+
+  call shuffle_part(npart)
+
+end subroutine delete_all_ghosts
+
+!-----------------------------------------------------------------------
+!+
+! create ghosts and splitghosts
+!+
+!-----------------------------------------------------------------------
+subroutine make_all_ghosts(npart,npartoftype,nchild,xyzh,vxyzu)
+  use part, only:iamghost,iamsplit,iphase
+  integer, intent(inout) :: npart,npartoftype(:)
+  integer, intent(in)    :: nchild
+  real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
+  integer :: iighost,merge_count,ii
+  integer(kind=1) :: iphaseii
+  logical :: ghost_it,split_it,already_ghost,already_split
+
+  iighost = npart
+  merge_count = 0
+  do ii = 1,npart
+    call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
+    call inside_boundary(xyzh(1:3,ii),split_it)
+    iphaseii = iphase(ii)
+    already_ghost = iamghost(iphaseii)
+    already_split = iamsplit(iphaseii)
+    if (ghost_it .and. .not.already_ghost) then
+      if (split_it) then ! this is inside the boundary and should be merged
+        merge_count = merge_count + 1
+        if (merge_count == nchild) then ! the lucky one that becomes a parent
+          iighost = iighost + 1
+          call make_a_ghost(iighost,ii,npartoftype,npart,nchild,xyzh)
+          merge_count = 0
+        endif
+      else if (.not.already_split) then     ! this is outside the boundary and should be split
+        call make_split_ghost(iighost+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
+        iighost = iighost + nchild
+      endif
+    endif
+  enddo
+
+end subroutine
 
 !-----------------------------------------------------------------------
 !+

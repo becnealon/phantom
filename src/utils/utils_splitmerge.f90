@@ -195,22 +195,21 @@ end subroutine fancy_merge_into_a_particle
 ! and discards the rest (super fast)
 !+
 !-----------------------------------------------------------------------
-subroutine fast_merge_into_a_particle(nchild,ichildren,mchild,npart, &
+subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
            xyzh,vxyzu,npartoftype,iparent)
  use part,   only:copy_particle,kill_particle
  integer, intent(in)    :: nchild,ichildren(nchild),iparent
  integer, intent(inout) :: npart
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
- real,    intent(in)    :: mchild
  integer, intent(inout) :: npartoftype(:)
  integer :: i
 
- ! use first child to be parent
- call copy_particle(ichildren(1),iparent)
- xyzh(4,iparent) = xyzh(4,ichildren(1)) * (nchild)**(1./3.)
+ ! use last child to be parent
+ call copy_particle(ichildren(nchild),iparent)
+ xyzh(4,iparent) = xyzh(4,ichildren(nchild)) * (nchild)**(1./3.)
 
  ! discard the rest
- do i=2,nchild
+ do i=1,nchild-1
     call kill_particle(ichildren(i),npartoftype(:))
  enddo
 

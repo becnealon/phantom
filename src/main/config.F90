@@ -196,12 +196,11 @@ module dim
 !--------------------
 ! Particle splitting
 !--------------------
+ integer, parameter :: nsplittypes = 3
 #ifdef SPLITTING
  logical, parameter :: split = .true.
- integer, parameter :: nsplittypes = 3
 #else
  logical, parameter :: split = .false.
- integer, parameter :: nsplittypes = 0
 #endif
 
  ! Maximum number of particle types

@@ -28,7 +28,7 @@ contains
 subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
            lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
- use part,        only:copy_particle
+ use part,        only:copy_particle_all
  integer, intent(in)    :: nchild,iparent,lattice_type,ires
  integer, intent(in)    :: ichildren !the index *after* which children are stored
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
@@ -49,7 +49,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
  do j=0,nchild-2
     ichild = ichild + 1
     ! copy properties
-    call copy_particle(iparent,ichildren+ichild)
+    call copy_particle_all(iparent,ichildren+ichild)
 
     ! adjust the position
     if (lattice_type == 0) then
@@ -140,7 +140,7 @@ end subroutine shift_particles
 subroutine fancy_merge_into_a_particle(nchild,ichildren,mchild,npart, &
                                        xyzh,vxyzu,iparent)
  use kernel, only:get_kernel,cnormk,radkern
- use part,   only:copy_particle,hfact
+ use part,   only:copy_particle_all,hfact
  integer, intent(in)    :: nchild,ichildren(nchild),iparent
  integer, intent(inout) :: npart
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
@@ -150,7 +150,7 @@ subroutine fancy_merge_into_a_particle(nchild,ichildren,mchild,npart, &
  real    :: qij,rij,wchild,grkernchild,rho_parent
 
  !-- copy properties from first child
- call copy_particle(ichildren(1),iparent)
+ call copy_particle_all(ichildren(1),iparent)
 
  !-- positions and velocities from centre of mass
  xyzh(1:3,iparent) = 0.
@@ -197,7 +197,7 @@ end subroutine fancy_merge_into_a_particle
 !-----------------------------------------------------------------------
 subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
            xyzh,vxyzu,npartoftype,iparent)
- use part,   only:copy_particle,kill_particle
+ use part,   only:copy_particle_all,kill_particle
  integer, intent(in)    :: nchild,ichildren(nchild),iparent
  integer, intent(inout) :: npart
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
@@ -205,7 +205,7 @@ subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
  integer :: i
 
  ! use last child to be parent
- call copy_particle(ichildren(nchild),iparent)
+ call copy_particle_all(ichildren(nchild),iparent)
  xyzh(4,iparent) = xyzh(4,ichildren(nchild)) * (nchild)**(1./3.)
 
  ! discard the rest
@@ -221,12 +221,12 @@ end subroutine fast_merge_into_a_particle
 !+
 !-----------------------------------------------------------------------
 subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh)
-  use part, only:copy_particle,set_particle_type,ighost
+  use part, only:copy_particle_all,set_particle_type,ighost
   integer, intent(in)    :: iighost,nchild,ireal
   integer, intent(inout) :: npartoftype(:),npart
   real, intent(inout)    :: xyzh(:,:)
 
-  call copy_particle(ireal,iighost)
+  call copy_particle_all(ireal,iighost)
   npartoftype(ighost) = npartoftype(ighost) + 1
   npart = npart + 1
   call set_particle_type(iighost,ighost)
@@ -240,13 +240,13 @@ end subroutine make_a_ghost
 !+
 !-----------------------------------------------------------------------
 subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
-  use part, only:copy_particle,set_particle_type,isplitghost
+  use part, only:copy_particle_all,set_particle_type,isplitghost
   integer, intent(in)    :: iighost,nchild,ireal
   integer, intent(inout) :: npartoftype(:),npart
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer :: jj
 
-  call copy_particle(ireal,iighost)
+  call copy_particle_all(ireal,iighost)
   call split_a_particle(nchild,iighost,xyzh,vxyzu, &
              0,1,iighost)
   do jj = 0,nchild

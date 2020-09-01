@@ -38,7 +38,7 @@ contains
 subroutine init_split(ierr)
  use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,&
                 massoftype,igas,isplit,npart,iamtype,iamsplit,iphase,ighost,&
-                iamghost,isplitghost,copy_particle
+                iamghost,isplitghost,copy_particle_all
  integer, intent(inout) :: ierr
  integer :: ii,jj,ichild,merge_count,children_list(nchild)
  logical :: split_it,already_split
@@ -269,6 +269,7 @@ subroutine read_options_splitting(name,valstring,imatch,igotall,ierr,isplitbound
  case('boundary width')
     read(valstring,*,iostat=ierr) gzw
     ngot = ngot + 1
+    if (gzw < tiny(gzw)) call fatal(label,'gzw must be > 0. in input options')
  case default
     imatch = .false.
     select case(isplitboundary)

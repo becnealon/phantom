@@ -175,12 +175,13 @@ subroutine cons2prim_everything(npart,xyzh,vxyzu,dvdx,rad,eos_vars,radprop,&
  real         :: Bxi,Byi,Bzi,psii,xi_limiteri,Bi,temperaturei
  real         :: xi,yi,zi,hi
  integer      :: iamtypei
- logical      :: iactivei,iamgasi,iamdusti
+ logical      :: iactivei,iamgasi,iamdusti,iamspliti
 
  iactivei = .true.
  iamtypei = igas
  iamgasi  = .true.
  iamdusti = .false.
+ iamspliti = .false.
 
 !$omp parallel do default (none) &
 !$omp shared(xyzh,vxyzu,npart,rad,eos_vars,radprop,Bevol,Bxyz) &
@@ -190,7 +191,7 @@ subroutine cons2prim_everything(npart,xyzh,vxyzu,dvdx,rad,eos_vars,radprop,&
 !$omp private(i,spsound,pondens,rhoi,p_on_rhogas,rhogas,gasfrac) &
 !$omp private(Bxi,Byi,Bzi,psii,xi_limiteri,Bi,temperaturei,ierr,pmassi) &
 !$omp private(xi,yi,zi,hi) &
-!$omp firstprivate(iactivei,iamtypei,iamgasi,iamdusti)
+!$omp firstprivate(iactivei,iamtypei,iamgasi,iamdusti,iamspliti)
  do i=1,npart
     if (.not.isdead_or_accreted(xyzh(4,i))) then
        !
@@ -201,7 +202,7 @@ subroutine cons2prim_everything(npart,xyzh,vxyzu,dvdx,rad,eos_vars,radprop,&
        zi      = xyzh(3,i)
        hi      = xyzh(4,i)
 
-       if (maxphase==maxp) call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamtypei)
+       if (maxphase==maxp) call get_partinfo(iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
 
        pmassi  = massoftype(iamtypei)
        rhoi    = rhoh(hi,pmassi)

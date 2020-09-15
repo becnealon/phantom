@@ -124,7 +124,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  use extern_densprofile, only:write_rhotab,rhotabfile,read_rhotab_wrapper
  use eos,             only:init_eos,init_eos_9,finish_eos,equationofstate,gmw,X_in,Z_in
  use eos_idealplusrad,only:get_idealplusrad_enfromtemp,get_idealgasplusrad_tempfrompres
- use part,            only:temperature,store_temperature
+ use part,            only:eos_vars,itemp,store_temperature
  use setstellarcore,  only:set_stellar_core
  use setfixedentropycore, only:set_fixedS_softened_core
  use setsoftenedcore, only:set_softened_core,find_hsoft_given_mcore,find_mcore_given_hsoft,&
@@ -409,15 +409,15 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
           tempi = initialtemp
           call equationofstate(ieos,p_on_rhogas,spsoundi,densi,xi,yi,zi,eni,tempi)
           vxyzu(4,i) = eni
-          if (store_temperature) temperature(i) = initialtemp
+          if (store_temperature) eos_vars(itemp,i) = initialtemp
        case(12) ! Ideal gas plus radiation EoS
           call get_idealgasplusrad_tempfrompres(presi*unit_pressure,densi*unit_density,gmw,tempi)
           call get_idealplusrad_enfromtemp(densi*unit_density,tempi,gmw,eni)
           vxyzu(4,i) = eni / unit_ergg
-          if (store_temperature) temperature(i) = tempi
+          if (store_temperature) eos_vars(itemp,i) = tempi
        case(10) ! MESA EoS
           vxyzu(4,i) = yinterp(enitab(1:npts),r(1:npts),ri)
-          if (store_temperature) temperature(i) = yinterp(temp(1:npts),r(1:npts),ri)
+          if (store_temperature) eos_vars(itemp,i) = yinterp(temp(1:npts),r(1:npts),ri)
        case default
           if (gamma < 1.00001) then
              vxyzu(4,i) = polyk
@@ -824,20 +824,26 @@ subroutine read_setupfile(filename,gamma,polyk,ierr)
  ! core softening
  if (iprofile==imesa) then
     call read_inopt(isoftcore,'isoftcore',db,errcount=nerr)
-    if (isoftcore == 1) call read_inopt(isofteningopt,'isofteningopt',db,errcount=nerr)
-    if ((isofteningopt==1) .or. (isofteningopt==3) .or. (isoftcore == 2)) call read_inopt(hdens,'hdens',db,errcount=nerr)
-    if ((isofteningopt==2) .or. (isofteningopt==3) .or. (isoftcore == 2)) call read_inopt(mcore,'mcore',db,errcount=nerr)
+    select case(isoftcore)
+    case(0) ! sink particle core without softening
+       call read_inopt(isinkcore,'isinkcore',db,errcount=nerr)
+       if (isinkcore) then
+          call read_inopt(mcore,'mcore',db,errcount=nerr)
+          call read_inopt(hsoft,'hsoft',db,errcount=nerr)
+       endif
+    case(1) ! cubic core density profile
+       call read_inopt(isofteningopt,'isofteningopt',db,errcount=nerr)
+       if ((isofteningopt==1) .or. (isofteningopt==3)) call read_inopt(hdens,'hdens',db,errcount=nerr)
+       if ((isofteningopt==2) .or. (isofteningopt==3)) call read_inopt(mcore,'mcore',db,errcount=nerr)
+    case(2) ! fixed entropy softened core
+       call read_inopt(hdens,'hdens',db,errcount=nerr)
+       call read_inopt(mcore,'mcore',db,errcount=nerr)
+    end select
+
     if (isoftcore > 0) then
        call read_inopt(unsoftened_profile,'unsoftened_profile',db,errcount=nerr)
        call read_inopt(outputfilename,'outputfilename',db,errcount=nerr)
        if (ieos==2) call read_inopt(gamma,'gamma',db,errcount=nerr)
-    endif
-
-    ! sink particle core
-    if (isoftcore == 0) call read_inopt(isinkcore,'isinkcore',db,errcount=nerr)
-    if (isinkcore .and. (isoftcore == 0)) then
-       call read_inopt(mcore,'mcore',db,errcount=nerr)
-       call read_inopt(hsoft,'hsoft',db,errcount=nerr)
     endif
  endif
 

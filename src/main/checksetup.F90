@@ -37,11 +37,12 @@ contains
 !+
 !------------------------------------------------------------------
 subroutine check_setup(nerror,nwarn,restart)
- use dim,  only:maxp,maxvxyzu,periodic,use_dust,ndim,mhd,maxdusttypes,use_dustgrowth
+ use dim,  only:maxp,maxvxyzu,periodic,use_dust,ndim,mhd,maxdusttypes,use_dustgrowth,do_radiation,store_temperature
  use part, only:xyzh,massoftype,hfact,vxyzu,npart,npartoftype,nptmass,gravity, &
                 iphase,maxphase,isetphase,labeltype,igas,h2chemistry,maxtypes,&
-                idust,xyzmh_ptmass,vxyz_ptmass,dustfrac,iboundary,&
-                kill_particle,shuffle_part,iamtype,iamdust,Bxyz,ndustsmall
+                idust,xyzmh_ptmass,vxyz_ptmass,dustfrac,iboundary,isdeadh,ll,ideadhead,&
+                kill_particle,shuffle_part,iamtype,iamdust,Bxyz,ndustsmall,rad,radprop, &
+                remove_particle_from_npartoftype
  use eos,             only:gamma,polyk
  use centreofmass,    only:get_centreofmass
  use options,         only:ieos,icooling,iexternalforce,use_dustfrac,use_hybrid
@@ -52,7 +53,7 @@ subroutine check_setup(nerror,nwarn,restart)
  use boundary,        only:xmin,xmax,ymin,ymax,zmin,zmax
  integer, intent(out) :: nerror,nwarn
  logical, intent(in), optional :: restart
- integer      :: i,j,nbad,itype,nunity,iu
+ integer      :: i,j,nbad,itype,nunity,iu,ndead
  integer      :: ncount(maxtypes)
  real         :: xcom(ndim),vcom(ndim)
  real         :: hi,hmin,hmax,dust_to_gas
@@ -110,6 +111,10 @@ subroutine check_setup(nerror,nwarn,restart)
     nwarn = nwarn + 1
  endif
 #endif
+ if ( (ieos == 10 .or. ieos == 12) .and. .not. store_temperature) then
+    print*,'WARNING! Using non-ideal EoS but not storing temperature'
+    nwarn = nwarn + 1
+ endif
  if (npart < 0) then
     print*,'Error in setup: npart = ',npart,', should be >= 0'
     nerror = nerror + 1
@@ -140,6 +145,7 @@ subroutine check_setup(nerror,nwarn,restart)
 !
     ncount(:) = 0
     nbad = 0
+    ndead = 0
     do i=1,npart
        itype = iamtype(iphase(i))
        if (itype < 1 .or. itype > maxtypes) then
@@ -148,6 +154,7 @@ subroutine check_setup(nerror,nwarn,restart)
        else
           ncount(itype) = ncount(itype) + 1
        endif
+       if (isdeadh(xyzh(4,i))) ndead = ndead + 1
     enddo
     if (nbad > 0) then
        print*,'ERROR: unknown value of particle type on ',nbad,' particles'
@@ -158,6 +165,20 @@ subroutine check_setup(nerror,nwarn,restart)
        print*,'npartoftype  =',npartoftype
        print*,'ERROR: sum of types in iphase is not equal to npartoftype'
        nerror = nerror + 1
+    endif
+    if (ndead > 0) then
+       print*,'ZOMBIE ALERT:',ndead,' DEAD PARTICLES in particle setup'
+       if (ideadhead==0) then
+          print*,'REBUILDING DEAD PARTICLE LIST...'
+          do i=1,npart
+             if (isdeadh(xyzh(4,i))) then
+                ll(i) = ideadhead
+                ideadhead = i
+                call remove_particle_from_npartoftype(i,npartoftype)
+             endif
+          enddo
+       endif
+       nwarn = nwarn + 1
     endif
  endif
 !
@@ -398,6 +419,11 @@ subroutine check_setup(nerror,nwarn,restart)
 #ifdef GR
  call check_gr(npart,nerror,xyzh,vxyzu)
 #endif
+
+!
+!--check radiation setup
+!
+ if (do_radiation) call check_setup_radiation(npart,nerror,radprop,rad)
 
 !
 !--check dust growth arrays
@@ -735,5 +761,49 @@ subroutine check_for_identical_positions(npart,xyzh,nbad)
  deallocate(index)
 
 end subroutine check_for_identical_positions
+
+
+!------------------------------------------------------------------
+!+
+! 1) check for optically thin particles when mcfost is disabled,
+! as the particles will then be overlooked if they are flagged as thin
+! 2) To do! : check that radiation energy is never negative to begin with
+!+
+!------------------------------------------------------------------
+
+subroutine check_setup_radiation(npart, nerror, radprop, rad)
+ use part,      only:ithick, iradxi, ikappa
+ integer, intent(in)    :: npart
+ integer, intent(inout) :: nerror
+ real,    intent(in)    :: rad(:,:), radprop(:,:)
+ integer :: i, nthin, nradEn, nkappa
+
+ nthin = 0
+ nradEn = 0
+ nkappa = 0
+ do i=1, npart
+    if (radprop(ithick, i) < 0.5) nthin=nthin + 1
+    if (rad(iradxi, i) < 0.) nradEn=nradEn + 1
+    if (radprop(ikappa, i) == 0.0) nkappa=nkappa + 1
+ enddo
+
+ if (nthin > 0) then
+    print "(/,a,i10,a,i10,a,/)",' WARNING in setup: ',nthin,' of ',npart,&
+    ' particles are being treated as optically thin without MCFOST being compiled'
+    nerror = nerror + 1
+ endif
+
+ if (nradEn > 0) then
+    print "(/,a,i10,a,i10,a,/)",' WARNING in setup: ',nradEn,' of ',npart,&
+    ' particles have negative radiation Energy'
+    nerror = nerror + 1
+ endif
+
+ if (nkappa > 0) then
+    print "(/,a,i10,a,i10,a,/)",' WARNING in setup: ',nkappa,' of ',npart,&
+    ' particles have opacity 0.0'
+    nerror = nerror + 1
+ endif
+end subroutine check_setup_radiation
 
 end module checksetup

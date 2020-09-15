@@ -35,7 +35,7 @@ UNAME=${shell uname}
 # Sensible defaults for phantom configuration
 #----------------------------------------------------------------
 CONFIG        = config.F90
-SETUPFILE     = setup_unifdis.F90
+SETUPFILE     = setup_unifdis.f90
 MODFILE       = moddump_default.f90
 ANALYSIS      = analysis_dtheader.f90
 MULTIRUNFILE  = multirun.f90
@@ -196,7 +196,7 @@ ifeq ($(SETUP), turbdrive)
     else
        FPPFLAGS= -DPERIODIC # -DCORRECT_MEAN_FORCE
     endif
-    SETUPFILE= setup_unifdis.F90
+    SETUPFILE= setup_unifdis.f90
     SRCTURB= forcing.F90
     MULTIRUNFILE= multirun_mach.f90
     KNOWN_SETUP=yes
@@ -735,7 +735,7 @@ endif
 ifeq ($(SETUP), balsarakim)
 #   Balsara-Kim 2004
     PERIODIC=yes
-    SETUPFILE= setup_unifdis.F90
+    SETUPFILE= setup_unifdis.f90
     MHD=yes
     KNOWN_SETUP=yes
     SRCINJECT=inject_sne.f90
@@ -850,7 +850,7 @@ endif
 ifeq ($(WIND), yes)
 #   wind particle injection setup
     SETUPFILE= setup_wind.F90
-    SRCINJECT= wind_equations.F90 wind.F90 inject_wind.f90
+    SRCINJECT= wind_equations.f90 wind.F90 inject_wind.f90
     KNOWN_SETUP=yes
     IND_TIMESTEPS=no
     STS_TIMESTEPS=no
@@ -1020,7 +1020,7 @@ endif
 
 ifeq ($(SETUP), default)
     KNOWN_SETUP=yes
-    SETUPFILE= setup_unifdis.F90
+    SETUPFILE= setup_unifdis.f90
     PERIODIC=yes
     DUST=yes
 endif
@@ -1101,7 +1101,7 @@ ifeq ($(SETUP), radiativebox)
 endif
 
 ifndef SETUPFILE
-    SETUPFILE= setup_unifdis.F90
+    SETUPFILE= setup_unifdis.f90
 endif
 
 ifndef SRCNIMHD
@@ -1113,7 +1113,7 @@ ifndef SRCDUST
 endif
 
 ifdef SMOL
-    SRCDUST+= growth_smol.F90
+    SRCDUST+= growth_smol.f90
 endif
 
 #ifndef SRCGROWTH
@@ -1720,16 +1720,14 @@ SRCPOT=${SRCPOTS}
 endif
 
 ifeq ($(GR),yes)
-ifndef SRCMETRIC
+   SRCPOT=extern_gr.F90 $(SRCPOTS:externalforces.F90=externalforces_gr.F90)
+endif
 ifdef METRIC
    SRCMETRIC= metric_${METRIC}.f90
 else
    SRCMETRIC= metric_minkowski.f90
 endif
-endif
-   SRCGR=inverse4x4.f90 $(SRCMETRIC) metric_tools.f90 utils_gr.f90 cons2primsolver.f90 cons2prim.f90
-   SRCPOT=extern_gr.F90 externalforces_gr.F90
-endif
+SRCGR=inverse4x4.f90 $(SRCMETRIC) metric_tools.f90 utils_gr.f90 cons2primsolver.f90
 
 ifeq ($(SPLITTING), yes)
    SRCSPLIT= utils_splitmerge.f90 splitting.f90
@@ -1739,11 +1737,11 @@ endif
 
 SRCCHEM= fs_data.f90 mol_data.f90 utils_spline.f90 h2cooling.f90 h2chem.f90 cooling.F90
 
-SRCMESA= eos_mesa_microphysics.F90 eos_mesa.f90
+SRCMESA= eos_mesa_microphysics.f90 eos_mesa.f90
 SRCEOS = ${SRCMESA} eos_shen.f90 eos_helmholtz.f90 eos_idealplusrad.f90 eos.F90
 
 ifeq ($(HDF5), yes)
-   SRCREADWRITE_DUMPS= utils_hdf5.F90 utils_dumpfiles_hdf5.F90 readwrite_dumps_common.F90 readwrite_dumps_fortran.F90 readwrite_dumps_hdf5.F90 readwrite_dumps.F90
+   SRCREADWRITE_DUMPS= utils_hdf5.f90 utils_dumpfiles_hdf5.f90 readwrite_dumps_common.F90 readwrite_dumps_fortran.F90 readwrite_dumps_hdf5.F90 readwrite_dumps.F90
 else
    SRCREADWRITE_DUMPS= readwrite_dumps_common.F90 readwrite_dumps_fortran.F90 readwrite_dumps.F90
 endif
@@ -1761,13 +1759,14 @@ SOURCES= physcon.f90 ${CONFIG} ${SRCKERNEL} io.F90 units.f90 boundary.f90 \
          setup_params.f90 timestep.f90 utils_dumpfiles.f90 utils_indtimesteps.F90 utils_infiles.f90 \
          utils_sort.f90 utils_supertimestep.F90 utils_tables.f90 utils_gravwave.f90 \
          utils_sphNG.f90 utils_vectors.f90 utils_datafiles.f90 datafiles.f90 \
-         gitinfo.f90 ${SRCFASTMATH} random.f90 ${SRCEOS} ${SRCGR} checkoptions.F90 \
-         viscosity.f90 options.f90 centreofmass.f90 ${SRCPOT} damping.f90 checkconserved.f90 \
+         gitinfo.f90 ${SRCFASTMATH} random.f90 ${SRCEOS} cullendehnen.f90 ${SRCNIMHD} ${SRCGR}\
+         checkoptions.F90 viscosity.f90 options.f90 radiation_utils.f90 cons2prim.f90 \
+         centreofmass.f90 ${SRCPOT} damping.f90 checkconserved.f90 \
          partinject.F90 utils_inject.f90 utils_filenames.f90 utils_summary.F90 ${SRCCHEM} \
          ${SRCDUST} dust_formation.F90 ptmass_radiation.F90 \
          mpi_dens.F90 mpi_force.F90 stack.F90 mpi_derivs.F90 kdtree.F90 linklist_kdtree.F90 ${SRCTURB} \
-         ${SRCNIMHD} ${SRCPHOTO} ${SRCINJECT} ${SRCKROME} ${SRCSPLIT} memory.F90 ${SRCREADWRITE_DUMPS}  \
-         quitdump.f90 ptmass.F90 radiation_utils.f90 \
+         ${SRCPHOTO} ${SRCINJECT} ${SRCKROME} ${SRCSPLIT} memory.F90 ${SRCREADWRITE_DUMPS}  \
+         quitdump.f90 ptmass.F90 \
          readwrite_infile.F90 dens.F90 force.F90 utils_deriv.f90 deriv.F90 energies.F90 sort_particles.F90 \
          evwrite.F90 step_leapfrog.F90 writeheader.F90 ${SRCAN} step_supertimestep.F90 mf_write.f90 evolve.F90 \
          checksetup.F90 initial.F90
@@ -1840,7 +1839,7 @@ SRCDUMP= physcon.f90 ${CONFIG} ${SRCKERNEL} io.F90 units.f90 boundary.f90 mpi_ut
          utils_dumpfiles.f90 utils_vectors.f90 utils_mathfunc.f90 \
          utils_datafiles.f90 utils_filenames.f90 utils_tables.f90 datafiles.f90 gitinfo.f90 \
          centreofmass.f90 \
-         timestep.f90 ${SRCEOS} ${SRCGR} ${SRCPOT} ${SRCPHOTO} \
+         timestep.f90 ${SRCEOS} cullendehnen.f90 ${SRCGR} ${SRCPOT} ${SRCPHOTO} \
          memory.F90 \
          utils_sphNG.f90 \
          setup_params.f90 ${SRCFASTMATH} checkoptions.F90 \
@@ -1904,8 +1903,8 @@ SRCTESTS=utils_testsuite.f90 ${TEST_FASTMATH} test_kernel.f90 \
          test_nonidealmhd.F90 directsum.f90 test_gravity.F90 \
          test_derivs.F90 test_cooling.f90 test_eos.f90 test_externf.f90 test_rwdump.f90 \
          test_step.F90 test_indtstep.F90 set_disc.F90 test_setdisc.F90 \
-         test_link.F90 test_kdtree.F90 test_ptmass.F90 test_luminosity.F90\
-         test_gnewton.F90 test_corotate.f90 test_geometry.f90 \
+         test_link.F90 test_kdtree.F90 test_part.f90 test_ptmass.F90 test_luminosity.F90\
+         test_gnewton.f90 test_corotate.f90 test_geometry.f90 \
          test_sedov.F90 test_radiation.F90 \
          testsuite.F90 phantomtest.f90
 
@@ -1915,7 +1914,7 @@ endif
 # replace a few test routines for the GR code
 ifeq ($(GR),yes)
    SRCTEST1 = $(SRCTESTS:test_externf.f90=test_externf_gr.f90)
-   SRCTEST2 = $(SRCTEST1:test_gnewton.F90=)
+   SRCTEST2 = $(SRCTEST1:test_gnewton.f90=)
    SRCTEST = $(SRCTEST2:test_corotate.f90=test_gr.f90)
 endif
 OBJTEST1= $(SRCTEST:.f90=.o)
@@ -1946,8 +1945,8 @@ phantom-version.h:
 
 #----------------------------------------------------
 # Smoluchowsky library
-growth_smol.o: checksmol ../src/main/growth_smol.F90
-	$(FC) -c $(FFLAGS) ${FPP_PREFIX} $(FPPFLAGS) ../src/main/growth_smol.F90 -I$(SMOL_DIR) -o $@
+growth_smol.o: checksmol ../src/main/growth_smol.f90
+	$(FC) -c $(FFLAGS) ${FPP_PREFIX} $(FPPFLAGS) ../src/main/growth_smol.f90 -I$(SMOL_DIR) -o $@
 
 #----------------------------------------------------
 # Probability Distribution Functions from fixed grid
@@ -2011,9 +2010,10 @@ MODDUMPBIN=phantommoddump
 endif
 OBJMOD1 = utils_omp.F90 utils_summary.f90 utils_indtimesteps.F90 \
           utils_sort.f90 checksetup.f90 set_Bfield.f90 \
-          partinject.F90 random.f90 set_disc.F90 set_dust.f90 \
+          random.f90 set_disc.F90 set_dust.f90 \
           ${SRCTURB} ${SRCNIMHD} ${SRCCHEM} dust_formation.F90 ptmass_radiation.F90 \
-          icosahedron.f90 utils_inject.f90 ${SRCINJECT} \
+          icosahedron.f90 radiation_utils.f90 cons2prim.f90 \
+          partinject.F90 utils_inject.f90 ${SRCINJECT} \
           density_profiles.f90 ptmass.F90 damping.f90 readwrite_infile.f90 ${MODFILE:.f90=.o}
 OBJMOD2 = ${OBJMOD1:.F90=.o}
 OBJMOD = ${OBJMOD2:.f90=.o}

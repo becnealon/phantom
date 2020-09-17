@@ -26,12 +26,13 @@ contains
 !+
 !--------------------------------------------------------------------------
 subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
-           lattice_type,ires,ichildren)
+           npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
- use part,        only:copy_particle_all
+ use part,        only:copy_particle_all,igas,isplit,set_particle_type
  integer, intent(in)    :: nchild,iparent,lattice_type,ires
  integer, intent(in)    :: ichildren !the index *after* which children are stored
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
+ integer, intent(inout) :: npartoftype(:)
  integer :: j,iseed,ichild
  real    :: dhfac,dx(3),sep,geodesic_R(0:19,3,3), geodesic_v(0:11,3)
 
@@ -58,12 +59,18 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
        call sample_kernel(iseed,dx)
     endif
     xyzh(1:3,ichildren+ichild) = xyzh(1:3,iparent) + sep*dx(:)
+    call set_particle_type(ichildren+ichild,isplit)
  enddo
 
  !--amend smoothing length of children + parent
  dhfac = 1./(nchild)**(1./3.)
  xyzh(4,ichildren:ichildren+nchild-1) = xyzh(4,iparent)*dhfac
  xyzh(4,iparent) = xyzh(4,iparent)*dhfac
+ call set_particle_type(iparent,isplit)
+
+ !-- tidy up particle types
+ npartoftype(igas) = npartoftype(igas) - 1
+ npartoftype(isplit) = npartoftype(isplit) + nchild
 
 end subroutine split_a_particle
 
@@ -166,7 +173,6 @@ subroutine fancy_merge_into_a_particle(nchild,ichildren,mchild,npart, &
 
 !-- calculate density at the parent position from the children
 !-- procedure described in Vacondio et al. 2013, around Eq 21
-!-- here, we only use the neighbours of the children
  rho_parent = 0.
  do j=1,npart
     h1 = 1./xyzh(4,j)
@@ -197,21 +203,26 @@ end subroutine fancy_merge_into_a_particle
 !-----------------------------------------------------------------------
 subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
            xyzh,vxyzu,npartoftype,iparent)
- use part,   only:copy_particle_all,kill_particle
+ use part,   only:copy_particle_all,kill_particle,igas,isplit,set_particle_type
  integer, intent(in)    :: nchild,ichildren(nchild),iparent
  integer, intent(inout) :: npart
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(inout) :: npartoftype(:)
  integer :: i
 
- ! use last child to be parent
+ ! lucky last child becomes parent
  call copy_particle_all(ichildren(nchild),iparent)
  xyzh(4,iparent) = xyzh(4,ichildren(nchild)) * (nchild)**(1./3.)
+ call set_particle_type(iparent,igas)
 
- ! discard the rest
+ ! kill the useless children
  do i=1,nchild-1
     call kill_particle(ichildren(i),npartoftype(:))
  enddo
+
+ !-- tidy up particle types
+ npartoftype(igas) = npartoftype(igas) + 1
+ npartoftype(isplit) = npartoftype(isplit) - 1
 
 end subroutine fast_merge_into_a_particle
 
@@ -230,7 +241,6 @@ subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh)
   npartoftype(ighost) = npartoftype(ighost) + 1
   npart = npart + 1
   call set_particle_type(iighost,ighost)
-  xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
 
 end subroutine make_a_ghost
 
@@ -248,7 +258,7 @@ subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
 
   call copy_particle_all(ireal,iighost)
   call split_a_particle(nchild,iighost,xyzh,vxyzu, &
-             0,1,iighost)
+             npartoftype,0,1,iighost)
   do jj = 0,nchild
     call set_particle_type(iighost+jj,isplitghost)
   enddo

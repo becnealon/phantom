@@ -126,6 +126,10 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  use cons2prim,      only:cons2primall
  use extern_gr,      only:get_grforce_all
 #endif
+#ifdef SPLITTING
+ use part,           only:shuffle_part,iamghost,npartoftype,iamsplit,iactive
+ use split,          only:check_split_or_merge,check_ghost_or_splitghost
+#endif
  use timing,         only:increment_timer,get_timings
  use derivutils,     only:timer_extf
  use growth,         only:check_dustprop
@@ -150,6 +154,9 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #endif
 #else
  integer(kind=1), parameter :: nbinmax = 0
+#endif
+#ifdef SPLITTING
+ integer :: have_split,merge_count,merge_ghost_count
 #endif
  integer, parameter :: maxits = 30
  logical            :: converged,store_itype
@@ -178,7 +185,6 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  pmassi  = massoftype(itype)
  store_itype = (maxphase==maxp .and. ntypes > 1)
  ialphaloc = 2
-
  !$omp parallel do default(none) &
  !$omp shared(npart,xyzh,vxyzu,fxyzu,iphase,hdtsph,store_itype) &
  !$omp shared(rad,drad,pxyzu)&
@@ -257,6 +263,11 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 ! interpolation of SPH quantities needed in the SPH
 ! force evaluations, using dtsph
 !----------------------------------------------------
+#ifdef SPLITTING
+ have_split = 0
+ merge_count = 0
+ merge_ghost_count = 0
+#endif
 !$omp parallel do default(none) schedule(guided,1) &
 !$omp shared(maxp,maxphase,maxalpha) &
 !$omp shared(xyzh,vxyzu,vpred,fxyzu,divcurlv,npart,store_itype) &
@@ -352,6 +363,17 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
     endif
  enddo predict_sph
  !$omp end parallel do
+#ifdef SPLITTING
+split_loop: do i=1,npart
+  if (iactive(iphase(i))) then
+    call check_split_or_merge(i,iphase(i),xyzh,vxyzu,npart,npartoftype,merge_count,have_split)
+  endif
+enddo split_loop
+
+npart = npart + have_split
+call shuffle_part(npart)
+#endif
+
  if (use_dustgrowth) call check_dustprop(npart,dustproppred(1,:))
 
 !

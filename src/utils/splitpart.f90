@@ -54,7 +54,7 @@ subroutine split_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
     ! send in the parent, children return
     ! (the parent acts as the first child, this routine generates nchild-1 new particles
     ! and adjusts the smoothing length on the parent)
-    call split_a_particle(nchild,iparent,xyzh,vxyzu,lattice_type,ires,ichild)
+    call split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,ires,ichild)
 
     ! for next children
     ichild = ichild + nchild - 1

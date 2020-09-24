@@ -26,13 +26,13 @@ contains
 subroutine split_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
                                  nchild,lattice_type,ires)
  use io,    only:fatal,error
- use part,  only:igas,copy_particle
+ use part,  only:igas,copy_particle,shuffle_part,set_particle_type,isplit
  integer, intent(inout) :: npart
  integer, intent(inout) :: npartoftype(:)
  real,    intent(inout) :: massoftype(:)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(in)    :: lattice_type,ires,nchild
- integer :: ierr,ichild,iparent
+ integer :: ierr,ichild,iparent,j
 
  ierr = 0
 
@@ -43,25 +43,31 @@ subroutine split_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
     return
  endif
 
- !--update npartoftype
- npartoftype(:) = npartoftype*nchild
-
  !--find positions of the new particles
-
  ichild = npart !to keep track of the kids
-
  do iparent=1,npart
     ! send in the parent, children return
     ! (the parent acts as the first child, this routine generates nchild-1 new particles
     ! and adjusts the smoothing length on the parent)
     call split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,ires,ichild)
 
+    ! undo type, as we don't want to continue simulation with split particles
+    do j=1,nchild
+      call set_particle_type(ichild+j,igas)
+    enddo
+
     ! for next children
     ichild = ichild + nchild - 1
  enddo
 
+!-- new npartoftype
+npartoftype(igas) = npartoftype(isplit)
+npartoftype(isplit) = 0
+
  !-- new npart
  npart = npart * nchild
+
+ call shuffle_part(npart)
 
  !--new masses
  massoftype(:) = massoftype(:)/nchild

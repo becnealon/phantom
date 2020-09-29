@@ -43,7 +43,7 @@ subroutine init_split(ierr)
                 massoftype,npart,copy_particle_all,kill_particle,shuffle_part,isdead_or_accreted
  use dim, only:maxp_hard
  integer, intent(inout) :: ierr
- integer :: ii,have_split,merge_count,merge_ghost_count
+ integer :: ii,merge_count,merge_ghost_count,add_npart
  integer(kind=1) :: iphaseii
 
 ierr = 0
@@ -52,6 +52,7 @@ ierr = 0
 ! 1. delete an existing ghost (in case restarting)
 ! 2. should it be spilt or merged?
 ! 3. should ghosts be created?
+! (2 and 3 are *separate* steps)
 
 ! set masses
 massoftype(isplit) = massoftype(igas)/nchild
@@ -59,23 +60,25 @@ massoftype(ighost) = massoftype(igas)
 massoftype(isplitghost) = massoftype(isplit)
 
 ! 1. delete existing ghosts
-!call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
+call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
 
 ! 2. should it be split or merged?
 merge_count = 0
-have_split = 0
+add_npart = 0
 do ii = 1,npart
   iphaseii = iphase(ii)
-  call check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,have_split)
+  call check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
 enddo
-npart = npart + have_split
+npart = npart + add_npart
 call shuffle_part(npart)
 
 ! 3. should a ghost be made?
 merge_ghost_count = 0
-!do ii = 1,npart
-!  call check_ghost_or_splitghost(ii,iphase(ii),xyzh,vxyzu,npart,npartoftype,merge_ghost_count,inew)
-!enddo
+add_npart = 0
+do ii = 1,npart
+  call check_ghost_or_splitghost(ii,iphase(ii),xyzh,vxyzu,npart,npartoftype,merge_ghost_count,add_npart)
+enddo
+npart = npart + add_npart
 
 print*,'particle splitting is on, you now have',npart,'total particles'
 
@@ -87,14 +90,13 @@ end subroutine init_split
 !  goes ahead and does the appropriate operation
 !+
 !----------------------------------------------------------------
-subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,have_split)
+subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
   use part, only:set_particle_type,iamtype,shuffle_part
-  use dim,  only:maxp_hard
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer, intent(inout) :: npartoftype(:),npart
-  integer, intent(inout) :: have_split,merge_count
+  integer, intent(inout) :: merge_count,add_npart
   logical :: already_split,split_it
 
   call inside_boundary(xyzh(1:3,ii),split_it)
@@ -102,11 +104,10 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_c
   ! if it should be split but is not, split it
   if (split_it .and. .not.already_split) then
 
-    call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+have_split)
+    call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)
+    add_npart = add_npart + nchild - 1
 
-    have_split = have_split + nchild - 1
-
-    ! if it should not be split, but already is, merge it
+  ! if it should not be split, but already is, merge it
   else if (.not.split_it .and. already_split) then
     merge_count = merge_count + 1
     children_list(merge_count) = ii
@@ -126,30 +127,33 @@ end subroutine check_split_or_merge
 !  ghosts to start with
 !+
 !----------------------------------------------------------------
-subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_ghost_count,inew)
+subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_ghost_count,add_npart)
   use part, only:set_particle_type
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer, intent(inout) :: npartoftype(:),npart
-  integer, intent(inout) :: inew,merge_ghost_count
+  integer, intent(inout) :: add_npart,merge_ghost_count
   logical :: already_split,ghost_it,already_ghost
 
   call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
   already_ghost = iamghost(iphaseii)
   if (ghost_it .and. .not.already_ghost) then
     already_split = iamsplit(iphaseii)
-    if (already_split) then ! this is inside the boundary and should be merged (just use the original parent)
+    ! this is inside the boundary and should be merged (just use the original parent)
+    if (already_split) then
       merge_ghost_count = merge_ghost_count + 1
       if (merge_ghost_count == nchild) then
-        inew = inew + 1
-        call make_a_ghost(inew,ii,npartoftype,npart,nchild,xyzh)
-        xyzh(4,inew) = xyzh(4,inew) * (nchild)**(1./3.)
+        call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild,xyzh)
+        xyzh(4,npart+add_npart+1) = xyzh(4,npart+add_npart+1) * (nchild)**(1./3.)
+
         merge_ghost_count = 0
+        add_npart = add_npart + 1
       endif
-    else if (.not.already_split) then     ! this is outside the boundary and should be split
-      call make_split_ghost(inew+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
-      inew = inew + nchild
+    ! this is outside the boundary and should be split
+    else if (.not.already_split) then
+      call make_split_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
+      add_npart = add_npart + nchild
     endif
   endif
 end subroutine check_ghost_or_splitghost
@@ -211,8 +215,7 @@ end subroutine inside_ghost_zone
 !+
 !-----------------------------------------------------------------------
 subroutine delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
-  use part, only:kill_particle,iphase, &
-                 delete_dead_or_accreted_particles,shuffle_part
+  use part, only:kill_particle,iphase,shuffle_part
   integer, intent(inout) :: npartoftype(:),npart
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer :: ii

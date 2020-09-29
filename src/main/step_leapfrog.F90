@@ -127,8 +127,9 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  use extern_gr,      only:get_grforce_all
 #endif
 #ifdef SPLITTING
- use part,           only:shuffle_part,iamghost,npartoftype,iamsplit,iactive
+ use part,           only:shuffle_part,iamghost,npartoftype,iamsplit,iactive,iamghost,kill_particle
  use split,          only:check_split_or_merge,check_ghost_or_splitghost
+ use dim,            only:maxp_hard
 #endif
  use timing,         only:increment_timer,get_timings
  use derivutils,     only:timer_extf
@@ -156,7 +157,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  integer(kind=1), parameter :: nbinmax = 0
 #endif
 #ifdef SPLITTING
- integer :: have_split,merge_count,merge_ghost_count
+ integer :: merge_count,merge_ghost_count,add_npart
 #endif
  integer, parameter :: maxits = 30
  logical            :: converged,store_itype
@@ -264,9 +265,9 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 ! force evaluations, using dtsph
 !----------------------------------------------------
 #ifdef SPLITTING
- have_split = 0
  merge_count = 0
  merge_ghost_count = 0
+ add_npart = 0
 #endif
 !$omp parallel do default(none) schedule(guided,1) &
 !$omp shared(maxp,maxphase,maxalpha) &
@@ -365,13 +366,24 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  !$omp end parallel do
 #ifdef SPLITTING
 split_loop: do i=1,npart
-  if (iactive(iphase(i))) then
-    call check_split_or_merge(i,iphase(i),xyzh,vxyzu,npart,npartoftype,merge_count,have_split)
+  if (iactive(iphase(i)) .and. iamghost(iphase(i))) then
+    call kill_particle(i,npartoftype)
+    cycle split_loop
+  endif
+  if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+    call check_split_or_merge(i,iphase(i),xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
   endif
 enddo split_loop
-
-npart = npart + have_split
+npart = npart + add_npart
 call shuffle_part(npart)
+
+add_npart = 0
+do i = 1,npart
+  if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+    call check_ghost_or_splitghost(i,iphase(i),xyzh,vxyzu,npart,npartoftype,merge_ghost_count,add_npart)
+  endif
+enddo
+npart = npart + add_npart
 #endif
 
  if (use_dustgrowth) call check_dustprop(npart,dustproppred(1,:))

@@ -1229,9 +1229,10 @@ pure subroutine compute_cell(cell,listneigh,nneigh,getdv,getdB,Bevol,xyzh,vxyzu,
     if (maxphase==maxp) then
        call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     hi    = cell%h(i)
@@ -1390,9 +1391,10 @@ subroutine finish_cell(cell,cell_converged)
     if (maxphase==maxp) then
        call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
     !if (.not.iactivei) print*,' ERROR: should be no inactive particles here',iamtypei,iactivei
 
@@ -1554,9 +1556,10 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
     if (maxphase==maxp) then
        call get_partinfo(cell%iphase(i),iactivei,iamgasi,iamdusti,iamspliti,iamtypei)
     else
-       iactivei = .true.
-       iamtypei = igas
-       iamgasi  = .true.
+       iactivei  = .true.
+       iamtypei  = igas
+       iamgasi   = .true.
+       iamspliti = .false.
     endif
 
     pmassi = massoftype(iamtypei)

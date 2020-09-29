@@ -894,9 +894,16 @@ pure subroutine get_partinfo(iphasei,isactive,isgas,isdust,issplit,itype)
  ! split particles
  !
 #ifdef SPLITTING
-  issplit = ((itype==isplit) .or. (itype==isplitghost))
+ issplit = (itype==isplit)
+ if (itype==isplitghost) then
+    issplit = .true.
+    itype   = isplit
+ elseif (itype==ighost) then
+    isgas   = .true.
+    itype   = igas
+ endif
 #else
-  issplit = .false.
+ issplit = .false.
 #endif
 
 end subroutine get_partinfo

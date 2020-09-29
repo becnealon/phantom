@@ -1278,7 +1278,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
 
        projv = dvx*runix + dvy*runiy + dvz*runiz
 
-       if (iamgasj .and. maxvxyzu >= 4) then
+       if ((iamgasj .or. iamsplitj) .and. maxvxyzu >= 4) then
           enj   = vxyzu(4,j)
           if (store_temperature) then
              tempj = eos_vars(itemp,j)
@@ -1304,7 +1304,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
        vij       = abs((projbigvi-projbigvj)/(1.-projbigvi*projbigvj))
 #endif
 
-       if (iamgasi .and. iamgasj) then
+       if ((iamgasi .and. iamgasj) .or. (iamspliti .and. iamsplitj)) then
           !--work out vsig for timestepping and av
 #ifdef GR
           ! Relativistic version vij + csi    (could put a beta here somewhere?)
@@ -1351,7 +1351,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
 
           if (maxdvdx==maxp) dvdxj(:) = dvdx(:,j)
 
-          if (iamgasj) then
+          if (iamgasj .or. iamsplitj) then
              if (ndivcurlv >= 1) divvj = divcurlv(1,j)
              if (use_dustfrac) then
                 dustfracj(:) = dustfrac(:,j)
@@ -1436,7 +1436,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
           sxxj = 0.; sxyj = 0.; sxzj = 0.; syyj = 0.; syzj = 0.; szzj = 0.
        endif
 
-       ifgas: if (iamgasi .and. iamgasj) then
+       ifgas: if ((iamgasi .and. iamgasj) .or. (iamspliti .and. iamsplitj)) then
 
           !
           !--artificial viscosity term
@@ -1779,7 +1779,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
           ! gas-dust: compute drag terms
           !
           if (idrag>0) then
-             if (iamgasi .and. iamdustj .and. icut_backreaction==0) then
+             if ((iamgasi .or. iamspliti) .and. iamdustj .and. icut_backreaction==0) then
                 projvstar = projv
                 if (irecon >= 0) call reconstruct_dv(projv,dx,dy,dz,runix,runiy,runiz,dvdxi,dvdxj,pmassi,pmassj,projvstar,irecon)
                 dv2 = projvstar**2 ! dvx*dvx + dvy*dvy + dvz*dvz
@@ -1808,7 +1808,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
                    dragheating = dragterm*projv
                    fsum(idudtdissi) = fsum(idudtdissi) + dragheating
                 endif
-             elseif (iamdusti .and. iamgasj) then
+             elseif (iamdusti .and. (iamgasj .or. iamsplitj)) then
                 projvstar = projv
                 if (irecon >= 0) call reconstruct_dv(projv,dx,dy,dz,runix,runiy,runiz,dvdxi,dvdxj,pmassi,pmassj,projvstar,irecon)
                 dv2 = projvstar**2 !dvx*dvx + dvy*dvy + dvz*dvz
@@ -2087,7 +2087,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
     !
     if (maxdvdx==maxp) dvdxi(:) = dvdx(:,i)
 
-    if (iamgasi) then
+    if (iamgasi .or. iamspliti) then
        if (ndivcurlv >= 1) divcurlvi(:) = real(divcurlv(:,i),kind=kind(divcurlvi))
        if (maxvxyzu >= 4) then
           eni   = vxyzu(4,i)
@@ -2139,7 +2139,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
        !
        ! get stopping time - for one fluid dust we don't know deltav, but as small by definition we assume=0
        !
-       if (use_dustfrac .and. iamgasi) then
+       if (use_dustfrac .and. (iamgasi .or. iamspliti)) then
           tstopi = 0.
           do j=1,ndustsmall
              if (use_dustgrowth) then
@@ -2200,7 +2200,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
        cell%xpartvec(ieni,cell%npcell)             = vxyzu(4,i)
     endif
     if (mhd) then
-       if (iamgasi) then
+       if (iamgasi .or. iamspliti) then
           cell%xpartvec(iBevolxi,cell%npcell)      = Bevol(1,i)
           cell%xpartvec(iBevolyi,cell%npcell)      = Bevol(2,i)
           cell%xpartvec(iBevolzi,cell%npcell)      = Bevol(3,i)
@@ -2222,7 +2222,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
     cell%xpartvec(ialphai,cell%npcell)            = alphai
     cell%xpartvec(irhoi,cell%npcell)              = rhoi
     cell%xpartvec(idustfraci:idustfraciend,cell%npcell) = dustfraci
-    if (iamgasi) then
+    if (iamgasi .or. iamspliti) then
        cell%xpartvec(ivwavei,cell%npcell)         = vwavei
        cell%xpartvec(irhogasi,cell%npcell)        = rhogasi
        cell%xpartvec(ipri,cell%npcell)            = pri
@@ -2620,7 +2620,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
        if (ierror > 0) call error('get_u0 in force','1/sqrt(-v_mu v^mu) ---> non-negative: v_mu v^mu')
     endif
 
-    if (iamgasi) then
+    if (iamgasi .or. iamspliti) then
        rhoi    = xpartveci(irhoi)
        rho1i   = 1./rhoi
        rhogasi = xpartveci(irhogasi)
@@ -2678,7 +2678,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
     poten(i) = real(epoti,kind=kind(poten))
 #endif
 
-    if (mhd .and. iamgasi) then
+    if (mhd .and. (iamgasi .or. iamspliti)) then
        !
        !--for MHD, need to make the force stable when beta < 1.  In this regime,
        !  subtract off the B(div B)/rho term (Borve, Omang & Trulsen 2001, 2005);
@@ -2720,7 +2720,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
 #endif
     drhodti = pmassi*fsum(idrhodti)
 
-    isgas: if (iamgasi) then
+    isgas: if (iamgasi .or. iamspliti) then
        divvi = -drhodti*rho1i
        if (ndivcurlv >= 1) divcurlv(1,i) = real(divvi,kind=kind(divcurlv)) ! store divv from forces
 
@@ -2945,7 +2945,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
     endif
 
     ! one fluid dust timestep
-    if (use_dustfrac .and. iamgasi) then
+    if (use_dustfrac .and. (iamgasi .or. iamspliti)) then
        if (minval(dustfraci) > 0. .and. spsoundi > 0. .and. dustfracisum > epsilon(0.)) then
           tseff = (1.-dustfracisum)/dustfracisum*sum(dustfraci(:)*tstopi(:))
           dtdustdenom = dustfracisum*tseff*spsoundi**2
@@ -2963,7 +2963,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
        dtdrag = 0.9*ts_min
     endif
 
-    if (do_radiation.and.iamgasi) then
+    if (do_radiation.and.(iamgasi .or. iamspliti)) then
        if (radprop(ithick,i) < 0.5) then
           drad(iradxi,i) = 0.
        else
@@ -2991,7 +2991,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
        if (dti < tiny(dti) .or. dti > huge(dti)) call fatal('force','invalid dti',var='dti',val=dti) ! sanity check
        dtcheck = .true.
        dtrat   = dtc/dti
-       if ( iamgasi ) then
+       if ( iamgasi .or. iamspliti ) then
           call check_dtmin(dtcheck,dti,dtf    ,dtrat,ndtforce  ,dtfrcfacmean  ,dtfrcfacmax  ,dtchar,'dt_gasforce' )
           call check_dtmin(dtcheck,dti,dtcool ,dtrat,ndtcool   ,dtcoolfacmean ,dtcoolfacmax ,dtchar,'dt_cool'     )
           call check_dtmin(dtcheck,dti,dtvisci,dtrat,ndtvisc   ,dtviscfacmean ,dtviscfacmax ,dtchar,'dt_visc'     )
@@ -3035,7 +3035,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
     dtcourant = min(dtcourant,dtc)
     dtforce   = min(dtforce,dtf,dtcool,dtdrag,dtdusti,dtclean)
     dtvisc    = min(dtvisc,dtvisci)
-    if (mhd_nonideal .and. iamgasi) then
+    if (mhd_nonideal .and. (iamgasi .or. iamspliti)) then
        dtohm  = min(dtohm,  dtohmi  )
        dthall = min(dthall, dthalli )
        dtambi = min(dtambi, dtambii )

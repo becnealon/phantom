@@ -218,7 +218,7 @@ subroutine cons2prim_everything(npart,xyzh,vxyzu,dvdx,rad,eos_vars,radprop,&
        else
           rhogas  = rhoi
        endif
-       if (.not. iamgasi) cycle  !stop here if not a gas particle
+       if (.not. (iamgasi .or. iamspliti)) cycle  !stop here if not a gas particle
 
        !
        !--Calling Equation of state
@@ -247,7 +247,7 @@ subroutine cons2prim_everything(npart,xyzh,vxyzu,dvdx,rad,eos_vars,radprop,&
        !
        ! Cullen & Dehnen (2010) viscosity switch, set alphaloc
        !
-       if (nalpha >= 2 .and. iamgasi) then
+       if (nalpha >= 2 .and. (iamgasi .or. iamspliti)) then
           xi_limiteri = xi_limiter(dvdx(:,i))
           alphaind(2,i) = real4(get_alphaloc(real(alphaind(3,i)),spsound,hi,xi_limiteri,alpha,alphamax))
        endif

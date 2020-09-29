@@ -718,7 +718,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
           iamtypej  = iamtype(iphasej)
           iamdustj  = iamdust(iphasej)
           same_type = ((iamtypei == iamtypej) .or. (ibasetype(iamtypej)==iamtypei))
-          gas_gas   = (iamgasi .and. same_type)  ! this ensure that boundary particles are included in gas_gas calculations
+          gas_gas   = ((iamgasi .or. iamspliti) .and. same_type) ! this ensure that boundary particles are included in gas_gas calculations
        endif
 
        sametype: if (same_type) then
@@ -827,7 +827,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
              endif
 
           endif
-       elseif (use_dust .and. (iamgasi  .and. iamdustj)) then
+       elseif (use_dust .and. ((iamgasi .or. iamspliti)  .and. iamdustj)) then
           iloc = irhodusti + iamtypej - idust
           rhosum(iloc) = rhosum(iloc) + wabi
        endif sametype
@@ -1346,7 +1346,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,fxyzu,fext,Bevol,rad)
     cell%xpartvec(ifzi,cell%npcell)           = fxyzu(3,i) + fext(3,i)
 
     if (mhd) then
-       if (iamgasi) then
+       if (iamgasi .or. iamspliti) then
           cell%xpartvec(iBevolxi,cell%npcell) = Bevol(1,i)
           cell%xpartvec(iBevolyi,cell%npcell) = Bevol(2,i)
           cell%xpartvec(iBevolzi,cell%npcell) = Bevol(3,i)
@@ -1587,7 +1587,7 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
        ! so that rho times dustfrac gives dust density
        !
        dustfrac(:,lli) = 0.
-       if (iamgasi) then
+       if (iamgasi .or. iamspliti) then
           do l=1,ndustlarge
              rhodusti(l) = cnormk*massoftype(idust+l-1)*(rhosum(irhodusti+l-1))*hi31
              dustfrac(ndustsmall+l,lli) = rhodusti(l)*rho1i ! dust-to-gas ratio
@@ -1613,7 +1613,7 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
     !
     ! store div B, curl B and related quantities
     !
-    if (mhd .and. iamgasi) then
+    if (mhd .and. (iamgasi .or. iamspliti)) then
        if (getdB) then
           term = cnormk*pmassi*gradhi*rho1i*hi41
           call calculate_divcurlB_from_sums(rhosum,term,divcurlBi,ndivcurlB)
@@ -1634,7 +1634,7 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
        dvdx(:,lli) = real(dvdxi(:),kind=kind(dvdx))
     endif
 
-    if (do_radiation.and.iamgasi) radprop(ifluxx:ifluxz,lli) = cell%rhosums(iradfxi:iradfzi,i)*term
+    if (do_radiation.and.(iamgasi .or. iamspliti)) radprop(ifluxx:ifluxz,lli) = cell%rhosums(iradfxi:iradfzi,i)*term
 
     ! stats
     nneightry = nneightry + cell%nneightry

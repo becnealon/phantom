@@ -17,7 +17,7 @@ module moddump
 ! :Dependencies: io, part, splitpart
 !
  implicit none
- integer, parameter :: nchild = 2
+ integer, parameter :: nchild = 12
 
 contains
 

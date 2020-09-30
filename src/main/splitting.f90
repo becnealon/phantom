@@ -232,45 +232,6 @@ end subroutine delete_all_ghosts
 
 !-----------------------------------------------------------------------
 !+
-! create ghosts and splitghosts
-!+
-!-----------------------------------------------------------------------
-subroutine make_all_ghosts(npart,npartoftype,nchild,xyzh,vxyzu)
-  integer, intent(inout) :: npart,npartoftype(:)
-  integer, intent(in)    :: nchild
-  real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
-  integer :: iighost,merge_count,ii
-  integer(kind=1) :: iphaseii
-  logical :: ghost_it,split_it,already_ghost,already_split
-
-  iighost = npart
-  merge_count = 0
-  do ii = 1,npart
-    call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
-    call inside_boundary(xyzh(1:3,ii),split_it)
-    iphaseii = iphase(ii)
-    already_ghost = iamghost(iphaseii)
-    already_split = iamsplit(iphaseii)
-    if (ghost_it .and. .not.already_ghost) then
-      if (split_it) then ! this is inside the boundary and should be merged
-        merge_count = merge_count + 1
-        if (merge_count == nchild) then ! the lucky one that becomes a parent
-          iighost = iighost + 1
-          call make_a_ghost(iighost,ii,npartoftype,npart,nchild,xyzh)
-          xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
-          merge_count = 0
-        endif
-      else if (.not.already_split) then     ! this is outside the boundary and should be split
-        call make_split_ghost(iighost+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
-        iighost = iighost + nchild
-      endif
-    endif
-  enddo
-
-end subroutine
-
-!-----------------------------------------------------------------------
-!+
 !  Writes input options to the input file.
 !+
 !-----------------------------------------------------------------------

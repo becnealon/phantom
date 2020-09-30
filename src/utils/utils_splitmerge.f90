@@ -29,7 +29,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
            npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
  use part,        only:copy_particle_all,igas,isplit,set_particle_type
- use part,        only:rhoh,massoftype,iphase,kill_particle
+ use part,        only:kill_particle
  integer, intent(in)    :: nchild,iparent,lattice_type,ires,ichildren
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(inout) :: npartoftype(:)

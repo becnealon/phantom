@@ -223,7 +223,7 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
        ! send in children, parent returns
        ! parents temporarily stored after all the children
        call fancy_merge_into_a_particle(nchild,children_list, massoftype(igas), &
-                               npart,xyzh,vxyzu,npart+iparent)
+                               npart,xyzh,vxyzu,npartoftype,npart+iparent)
 
     enddo over_parent
  endif

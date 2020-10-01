@@ -28,7 +28,7 @@ module split
  private
 
  integer, parameter, public  :: nchild = 12
- integer, save    :: children_list(nchild) = 0
+ integer, save    :: children_list(nchild+1) = 0
  real, public     :: splitrad,splitbox(4),gzw
 
 contains
@@ -55,7 +55,7 @@ ierr = 0
 ! (2 and 3 are *separate* steps)
 
 ! set masses
-massoftype(isplit) = massoftype(igas)/nchild
+massoftype(isplit) = massoftype(igas)/(nchild+1)
 massoftype(ighost) = massoftype(igas)
 massoftype(isplitghost) = massoftype(isplit)
 
@@ -105,14 +105,14 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_c
   if (split_it .and. .not.already_split) then
 
     call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)
-    add_npart = add_npart + nchild - 1
+    add_npart = add_npart + nchild
 
   ! if it should not be split, but already is, merge it
   else if (.not.split_it .and. already_split) then
     merge_count = merge_count + 1
     children_list(merge_count) = ii
-    if (merge_count == nchild) then
-      call fast_merge_into_a_particle(nchild,children_list,npart, &
+    if (merge_count == nchild+1) then
+      call fast_merge_into_a_particle(nchild+1,children_list,npart, &
                                       xyzh,vxyzu,npartoftype,ii)
       merge_count = 0
     endif
@@ -143,9 +143,9 @@ subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,me
     ! this is inside the boundary and should be merged (just use the original parent)
     if (already_split) then
       merge_ghost_count = merge_ghost_count + 1
-      if (merge_ghost_count == nchild) then
-        call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild,xyzh)
-        xyzh(4,npart+add_npart+1) = xyzh(4,npart+add_npart+1) * (nchild)**(1./3.)
+      if (merge_ghost_count == nchild+1) then
+        call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild+1,xyzh)
+        xyzh(4,npart+add_npart+1) = xyzh(4,npart+add_npart+1) * (nchild+1)**(1./3.)
 
         merge_ghost_count = 0
         add_npart = add_npart + 1
@@ -153,7 +153,7 @@ subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,me
     ! this is outside the boundary and should be split
     else if (.not.already_split) then
       call make_split_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
-      add_npart = add_npart + nchild
+      add_npart = add_npart + nchild + 1
     endif
   endif
 end subroutine check_ghost_or_splitghost

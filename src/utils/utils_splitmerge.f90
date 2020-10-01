@@ -29,7 +29,6 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
            npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
  use part,        only:copy_particle_all,igas,isplit,set_particle_type
- use part,        only:kill_particle
  integer, intent(in)    :: nchild,iparent,lattice_type,ires,ichildren
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(inout) :: npartoftype(:)
@@ -48,7 +47,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
  ichild = 0
  dhfac = 1./(nchild)**(1./3.)
 
- do j=0,nchild-2
+ do j=0,nchild-1
     ichild = ichild + 1
     ! copy properties
     call copy_particle_all(iparent,ichildren+ichild)
@@ -70,9 +69,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
 
  !-- tidy up particle types
  npartoftype(igas) = npartoftype(igas) - 1
- npartoftype(isplit) = npartoftype(isplit) + nchild
-
- call kill_particle(iparent,npartoftype)
+ npartoftype(isplit) = npartoftype(isplit) + nchild + 1
 
 end subroutine split_a_particle
 
@@ -268,13 +265,13 @@ subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
   call copy_particle_all(ireal,iighost)
   call split_a_particle(nchild,iighost,xyzh,vxyzu, &
              npartoftype,0,1,iighost)
-  do jj = 0,nchild
+  do jj = 0,nchild+1
     call set_particle_type(iighost+jj,isplitghost)
   enddo
-  npartoftype(isplitghost) = npartoftype(isplitghost) + nchild
+  npartoftype(isplitghost) = npartoftype(isplitghost) + nchild + 1
   ! because split_a_particle is no longer generic
   npartoftype(igas) = npartoftype(igas) + 1
-  npartoftype(isplit) = npartoftype(isplit) - nchild
+  npartoftype(isplit) = npartoftype(isplit) - nchild - 1
 
 end subroutine make_split_ghost
 

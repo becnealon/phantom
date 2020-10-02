@@ -128,7 +128,6 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #endif
 #ifdef SPLITTING
  use part,           only:shuffle_part,iamghost,npartoftype,iamsplit,iactive,iamghost,kill_particle
- use part,           only:iamgas,iamsplit,iamghost
  use split,          only:check_split_or_merge,check_ghost_or_splitghost,inside_ghost_zone
  use dim,            only:maxp_hard
 #endif
@@ -158,8 +157,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  integer(kind=1), parameter :: nbinmax = 0
 #endif
 #ifdef SPLITTING
- integer :: merge_count,merge_ghost_count,add_npart,nsplit,ngas,nghosts,nsplitghosts
- integer :: ihavemerged,ihavemergedghosts,ihavesplit,ihavesplitghosts
+ integer :: merge_count,merge_ghost_count,add_npart
 #endif
  integer, parameter :: maxits = 30
  logical            :: converged,store_itype,evol_split
@@ -274,14 +272,6 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  merge_count = 0
  merge_ghost_count = 0
  add_npart = 0
- ngas = 0
- nghosts = 0
- nsplit = 0
- nsplitghosts = 0
- ihavemerged = 0
- ihavemergedghosts = 0
- ihavesplit = 0
- ihavesplitghosts = 0
 #endif
 !$omp parallel do default(none) schedule(guided,1) &
 !$omp shared(maxp,maxphase,maxalpha) &
@@ -389,7 +379,7 @@ split_loop: do i=1,npart
   endif
   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
     call check_split_or_merge(i,iphase(i),xyzh,vxyzu,npart,npartoftype,&
-    merge_count,add_npart,ihavesplit,ihavemerged)
+    merge_count,add_npart)
   endif
 enddo split_loop
 npart = npart + add_npart
@@ -399,11 +389,10 @@ add_npart = 0
 do i = 1,npart
   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
     call check_ghost_or_splitghost(i,iphase(i),xyzh,vxyzu,npart,npartoftype,&
-    merge_ghost_count,add_npart,ihavesplitghosts,ihavemergedghosts)
+    merge_ghost_count,add_npart)
   endif
 enddo
 npart = npart + add_npart
-
 #endif
 
  if (use_dustgrowth) call check_dustprop(npart,dustproppred(1,:))

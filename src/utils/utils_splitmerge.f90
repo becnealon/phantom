@@ -33,7 +33,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(inout) :: npartoftype(:)
  integer :: j,iseed,ichild
- real    :: dhfac,dx(3),sep,geodesic_R(0:19,3,3), geodesic_v(0:11,3)
+ real    :: dhfac,dx(3),sep,geodesic_R(0:19,3,3), geodesic_v(0:11,3),hchild
 
  if (lattice_type == 0) then
     call compute_matrices(geodesic_R)
@@ -43,9 +43,11 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
     iseed = -6542
  endif
 
- sep = xyzh(4,iparent)
+ dhfac = 1./(nchild+1)**(1./3.)
+ hchild = xyzh(4,iparent)*dhfac
+ sep = 1.5*hchild
  ichild = 0
- dhfac = 1./(nchild)**(1./3.)
+
 
  do j=0,nchild-1
     ichild = ichild + 1
@@ -218,7 +220,6 @@ subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
  integer :: i
 
  ! lucky last child becomes parent
- call copy_particle_all(ichildren(nchild),iparent)
  xyzh(4,iparent) = xyzh(4,ichildren(nchild)) * (nchild)**(1./3.)
  call set_particle_type(iparent,igas)
 
@@ -247,6 +248,8 @@ subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh)
   call copy_particle_all(ireal,iighost)
   npartoftype(ighost) = npartoftype(ighost) + 1
   call set_particle_type(iighost,ighost)
+  ! adjust smoothing length
+  xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
 
 end subroutine make_a_ghost
 

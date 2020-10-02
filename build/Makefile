@@ -256,8 +256,7 @@ ifeq ($(SETUP), disc)
 #   locally isothermal gas disc
     DISC_VISCOSITY=yes
     SETUPFILE= setup_disc.f90
-    ANALYSIS= analysis_BHangle.f90
-    LIVE_ANALYSIS=yes
+    ANALYSIS= analysis_disc.f90
     ISOTHERMAL=yes
     KNOWN_SETUP=yes
     MULTIRUNFILE= multirun.f90

@@ -22,8 +22,8 @@ module split
 
  implicit none
 
- public :: init_split,write_options_splitting,read_options_splitting,inside_ghost_zone
- public :: inside_boundary,check_split_or_merge,check_ghost_or_splitghost
+ public :: init_split,write_options_splitting,read_options_splitting
+ public :: check_split_or_merge,check_ghost_or_splitghost
 
  private
 
@@ -41,14 +41,10 @@ contains
 subroutine init_split(ierr)
  use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,iamtype,&
                 massoftype,npart,copy_particle_all,kill_particle,shuffle_part,isdead_or_accreted
- use part, only:iamgas,iamsplit,iamghost
  use dim, only:maxp_hard
  integer, intent(inout) :: ierr
  integer :: ii,merge_count,merge_ghost_count,add_npart
- integer :: ngas,nsplit,nsplitghosts,nghosts,ihavesplit,ihavemerged
- integer :: ihavesplitghosts,ihavemergedghosts,inzone,tobesplit
  integer(kind=1) :: iphaseii
- logical :: should_ghost,should_split
 
 ierr = 0
 
@@ -66,24 +62,13 @@ massoftype(isplitghost) = massoftype(isplit)
 ! 1. delete existing ghosts
 call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
 
-tobesplit = 0
-do ii = 1,npart
-  call inside_boundary(xyzh(1:3,ii),should_split)
-  call inside_ghost_zone(xyzh(1:3,ii),should_ghost)
-  if (should_split .and.should_ghost) tobesplit = tobesplit + 1
-enddo
-print*,'There are ',tobesplit,'particles to be split into ghosts.'
 ! 2. should it be split or merged?
 merge_count = 0
 add_npart = 0
-ihavesplit = 0
-ihavemerged = 0
-ihavesplitghosts = 0
-ihavemergedghosts = 0
 do ii = 1,npart
   iphaseii = iphase(ii)
   call check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,&
-  merge_count,add_npart,ihavesplit,ihavemerged)
+  merge_count,add_npart)
 enddo
 npart = npart + add_npart
 call shuffle_part(npart)
@@ -93,7 +78,7 @@ merge_ghost_count = 0
 add_npart = 0
 do ii = 1,npart
   call check_ghost_or_splitghost(ii,iphase(ii),xyzh,vxyzu,npart,npartoftype,&
-  merge_ghost_count,add_npart,ihavesplitghosts,ihavemergedghosts)
+  merge_ghost_count,add_npart)
 enddo
 npart = npart + add_npart
 
@@ -107,14 +92,13 @@ end subroutine init_split
 !  goes ahead and does the appropriate operation
 !+
 !----------------------------------------------------------------
-subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,&
-  merge_count,add_npart,ihavesplit,ihavemerged)
+subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
   use part, only:set_particle_type,iamtype,shuffle_part
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer, intent(inout) :: npartoftype(:),npart
-  integer, intent(inout) :: merge_count,add_npart,ihavesplit,ihavemerged
+  integer, intent(inout) :: merge_count,add_npart
   logical :: already_split,split_it
 
   call inside_boundary(xyzh(1:3,ii),split_it)
@@ -124,7 +108,6 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,&
 
     call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)
     add_npart = add_npart + nchild
-    ihavesplit = ihavesplit + 1
 
   ! if it should not be split, but already is, merge it
   else if (.not.split_it .and. already_split) then
@@ -134,7 +117,6 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,&
       call fast_merge_into_a_particle(nchild+1,children_list,npart, &
                                       xyzh,vxyzu,npartoftype,ii)
       merge_count = 0
-      ihavemerged = ihavemerged + 1
     endif
   endif
 
@@ -148,12 +130,12 @@ end subroutine check_split_or_merge
 !+
 !----------------------------------------------------------------
 subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,&
-  npartoftype,merge_ghost_count,add_npart,ihavesplitghosts,ihavemergedghosts)
+  npartoftype,merge_ghost_count,add_npart)
   use part, only:set_particle_type
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
-  integer, intent(inout) :: npartoftype(:),npart,ihavesplitghosts,ihavemergedghosts
+  integer, intent(inout) :: npartoftype(:),npart
   integer, intent(inout) :: add_npart,merge_ghost_count
   logical :: already_split,ghost_it,already_ghost
 
@@ -168,13 +150,11 @@ subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,&
         call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild+1,xyzh)
         merge_ghost_count = 0
         add_npart = add_npart + 1
-        ihavemergedghosts = ihavemergedghosts + 1
       endif
     ! this is outside the boundary and should be split
     else if (.not.already_split) then
       call make_split_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild,xyzh,vxyzu)
       add_npart = add_npart + nchild + 1
-      ihavesplitghosts = ihavesplitghosts + 1
     endif
   endif
 end subroutine check_ghost_or_splitghost

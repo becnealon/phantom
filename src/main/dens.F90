@@ -614,7 +614,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
  real                        :: wabi,grkerni,dwdhi,dphidhi
  real                        :: projv,dvx,dvy,dvz,dax,day,daz
  real                        :: projdB,dBx,dBy,dBz,fxi,fyi,fzi,fxj,fyj,fzj
- real                        :: rhoi, rhoj
+ real                        :: rhoi,rhoj,pmassi
  logical                     :: same_type,gas_gas,iamdustj
  real                        :: dradenij
 
@@ -719,6 +719,9 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
           iamdustj  = iamdust(iphasej)
           same_type = ((iamtypei == iamtypej) .or. (ibasetype(iamtypej)==iamtypei))
           gas_gas   = ((iamgasi .or. iamspliti) .and. same_type) ! this ensure that boundary particles are included in gas_gas calculations
+          pmassi    = massoftype(iamtypei)
+       else
+          pmassi    = massoftype(igas)
        endif
 
        sametype: if (same_type) then
@@ -796,8 +799,8 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
                 ! we need B instead of B/rho, so used our estimated h here
                 ! either it is close enough to be converged,
                 ! or worst case it runs another iteration and re-calculates
-                rhoi = rhoh(real(hi), massoftype(igas))
-                rhoj = rhoh(xyzh(4,j), massoftype(igas))
+                rhoi = rhoh(real(hi),  pmassi)
+                rhoj = rhoh(xyzh(4,j), pmassi)  ! can use pmassi since same_type=.true.
                 dBx = xpartveci(iBevolxi)*rhoi - Bevol(1,j)*rhoj
                 dBy = xpartveci(iBevolyi)*rhoi - Bevol(2,j)*rhoj
                 dBz = xpartveci(iBevolzi)*rhoi - Bevol(3,j)*rhoj
@@ -818,8 +821,8 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
              endif
 
              if (do_radiation .and. gas_gas) then
-                rhoi = rhoh(real(hi), massoftype(igas))
-                rhoj = rhoh(xyzh(4,j), massoftype(igas))
+                rhoi = rhoh(real(hi),  pmassi)
+                rhoj = rhoh(xyzh(4,j), pmassi)  ! can use pmassi since same_type=.true.
                 dradenij = rad(iradxi,j)*rhoj - xpartveci(iradxii)*rhoi
                 rhosum(iradfxi) = rhosum(iradfxi) + dradenij*runix
                 rhosum(iradfyi) = rhosum(iradfyi) + dradenij*runiy

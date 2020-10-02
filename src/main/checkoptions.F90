@@ -126,6 +126,10 @@ subroutine check_compile_time_settings(ierr)
  call error(string,'General relativity not compatible with turbulent driving.')
  ierr = 11
 #endif
+#ifdef DRIVING
+ call error(string,'General relativity not compatible with particle splitting.')
+ ierr = 9
+#endif
  if (icoordinate /= icoord_cartesian) then
     call fatal('checkoptions (GR)',&
    "You must use Cartesian-like coordinates in PHANTOM! Please change to Cartesian in metric_tools!'")

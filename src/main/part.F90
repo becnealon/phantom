@@ -985,7 +985,7 @@ pure elemental integer function ibasetype(itype)
     ibasetype = idust + (itype-idustbound) ! dust boundaries are dust
  elseif (itype==ighost) then
    ibasetype = igas                        ! ghost particles are gas
- elseif (itype==isplit .or. itype==isplitghost) then
+ elseif (itype==isplitghost) then
    ibasetype = isplit                      ! split particles
  else
     ibasetype = itype                      ! otherwise same as current type

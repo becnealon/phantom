@@ -77,7 +77,7 @@ subroutine init_evfile(iunit,evfile,open_file)
  use dim,       only: maxtypes,maxalpha,maxp,mhd,mhd_nonideal,lightcurve, &
                       use_CMacIonize,gws
  use options,   only: calc_erot,ishock_heating,ipdv_heating,use_dustfrac
- use part,      only: igas,idust,iboundary,istar,idarkmatter,ibulge,npartoftype,ndusttypes
+ use part,      only: igas,idust,iboundary,istar,idarkmatter,ibulge,isplit,npartoftype,ndusttypes
  use nicil,     only: use_ohm,use_hall,use_ambi,ion_rays,ion_thermal
  use viscosity, only: irealvisc
  integer,            intent(in) :: iunit
@@ -126,6 +126,7 @@ subroutine init_evfile(iunit,evfile,open_file)
     if (npartoftype(istar)       > 0) call fill_ev_tag(ev_fmt,iev_rhop(4),'rho star','xa',i,j)
     if (npartoftype(idarkmatter) > 0) call fill_ev_tag(ev_fmt,iev_rhop(5),'rho dm',  'xa',i,j)
     if (npartoftype(ibulge)      > 0) call fill_ev_tag(ev_fmt,iev_rhop(6),'rho blg', 'xa',i,j)
+    if (npartoftype(isplit)      > 0) call fill_ev_tag(ev_fmt,iev_rhop(7),'rho splt','xa',i,j)
  endif
  if (maxalpha==maxp)                  call fill_ev_tag(ev_fmt,iev_alpha,  'alpha',   'x' ,i,j)
  if ( mhd ) then

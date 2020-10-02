@@ -32,7 +32,7 @@ module energies
  integer,         public    :: iquantities
  integer(kind=8), public    :: ndead,npartall,np_cs_eq_0,np_e_eq_0
  integer,         public    :: iev_time,iev_ekin,iev_etherm,iev_emag,iev_epot,iev_etot,iev_totmom,iev_com(3),&
-                               iev_angmom,iev_rho,iev_dt,iev_dtx,iev_entrop,iev_rmsmach,iev_vrms,iev_rhop(6),&
+                               iev_angmom,iev_rho,iev_dt,iev_dtx,iev_entrop,iev_rmsmach,iev_vrms,iev_rhop(7),&
                                iev_alpha,iev_B,iev_divB,iev_hdivB,iev_beta,iev_temp,iev_etaar,iev_etao(2),iev_etah(4),&
                                iev_etaa(2),iev_vel,iev_vhall,iev_vion,iev_vdrift,iev_n(4),iev_nR(5),iev_nT(2),&
                                iev_dtg,iev_ts,iev_dm(maxdusttypes),iev_momall,iev_angall,iev_maccsink(2),&
@@ -63,7 +63,7 @@ subroutine compute_energies(t)
                           maxdusttypes,gws,do_radiation
  use part,           only:rhoh,xyzh,vxyzu,massoftype,npart,maxphase,iphase,&
                           npartoftype,alphaind,Bxyz,Bevol,divcurlB,iamtype,&
-                          igas,idust,iboundary,istar,idarkmatter,ibulge,&
+                          igas,idust,iboundary,istar,idarkmatter,ibulge,isplit,&
                           nptmass,xyzmh_ptmass,vxyz_ptmass,isdeadh,&
                           isdead_or_accreted,epot_sinksink,imacc,ispinx,ispiny,&
                           ispinz,mhd,gravity,poten,dustfrac,eos_vars,itemp,&
@@ -245,6 +245,9 @@ subroutine compute_energies(t)
           case(ibulge)
              call ev_data_update(ev_data_thread,iev_rhop(6), rhoi)
              np_rho_thread(ibulge) =  np_rho_thread(ibulge) + 1
+          case(isplit)
+             call ev_data_update(ev_data_thread,iev_rhop(7), rhoi)
+             np_rho_thread(isplit) =  np_rho_thread(isplit) + 1
           end select
        endif
 
@@ -346,7 +349,7 @@ subroutine compute_energies(t)
        !
        ! the following apply ONLY to gas particles
        !
-       isgas: if (itype==igas) then
+       isgas: if (itype==igas .or. itype==isplit) then
 
           npgas = npgas + 1
           if (use_dustfrac) then
@@ -717,6 +720,7 @@ subroutine compute_energies(t)
     if (np_rho(istar)       > 0) ev_data(iev_ave,iev_rhop(4)) = ev_data(iev_ave,iev_rhop(4))*real(npgas)/real(np_rho(istar))
     if (np_rho(idarkmatter) > 0) ev_data(iev_ave,iev_rhop(5)) = ev_data(iev_ave,iev_rhop(5))*real(npgas)/real(np_rho(idarkmatter))
     if (np_rho(ibulge)      > 0) ev_data(iev_ave,iev_rhop(6)) = ev_data(iev_ave,iev_rhop(6))*real(npgas)/real(np_rho(ibulge))
+    if (np_rho(isplit)      > 0) ev_data(iev_ave,iev_rhop(7)) = ev_data(iev_ave,iev_rhop(7))*real(npgas)/real(np_rho(isplit))
  endif
 
  if (iexternalforce > 0) then

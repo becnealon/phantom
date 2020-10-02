@@ -100,7 +100,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  use options,        only:idamp,iexternalforce,icooling,use_dustfrac
  use part,           only:xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,Bevol,dBevol, &
                           rad,drad,radprop,isdead_or_accreted,rhoh,dhdrho,&
-                          iphase,iamtype,massoftype,maxphase,igas,idust,mhd,&
+                          iphase,iamtype,massoftype,maxphase,igas,idust,isplit,mhd,&
                           iamboundary,get_ntypes,npartoftype,&
                           dustfrac,dustevol,ddustevol,eos_vars,alphaind,nptmass,&
                           dustprop,ddustprop,dustproppred,ndustsmall,pxyzu,dens,metrics,ics
@@ -160,7 +160,6 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #ifdef SPLITTING
  integer :: merge_count,merge_ghost_count,add_npart,nsplit,ngas,nghosts,nsplitghosts
  integer :: ihavemerged,ihavemergedghosts,ihavesplit,ihavesplitghosts
- logical :: should_ghost
 #endif
  integer, parameter :: maxits = 30
  logical            :: converged,store_itype
@@ -224,7 +223,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
        if (itype==idust .and. use_dustgrowth) then
           dustprop(:,i) = dustprop(:,i) + hdti*ddustprop(:,i)
        endif
-       if (itype==igas) then
+       if (itype==igas .or. itype==isplit) then
           if (mhd)          Bevol(:,i) = Bevol(:,i) + hdti*dBevol(:,i)
           if (do_radiation) rad(:,i)   = rad(:,i) + hdti*drad(:,i)
           if (use_dustfrac) then
@@ -339,7 +338,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
        if (use_dustgrowth .and. itype==idust) then
           dustproppred(:,i) = dustprop(:,i) + hdti*ddustprop(:,i)
        endif
-       if (itype==igas) then
+       if (itype==igas .or. itype==isplit) then
           if (mhd) Bpred(:,i) = Bevol (:,i) + hdti*dBevol(:,i)
           if (use_dustfrac) then
              rhoi          = rhoh(xyzh(4,i),pmassi)
@@ -495,7 +494,7 @@ npart = npart + add_npart
              endif
 
              if (use_dustgrowth .and. itype==idust) dustprop(:,i) = dustprop(:,i) + dti*ddustprop(:,i)
-             if (itype==igas) then
+             if (itype==igas .or. itype==isplit) then
                 if (mhd)          Bevol(:,i) = Bevol(:,i) + dti*dBevol(:,i)
                 if (do_radiation) rad(:,i)   = rad(:,i)   + dti*drad(:,i)
                 if (use_dustfrac) then
@@ -516,7 +515,7 @@ npart = npart + add_npart
              vxyzu(:,i) = vxyzu(:,i) + hdti*fxyzu(:,i)
           endif
           if (itype==idust .and. use_dustgrowth) dustprop(:,i) = dustprop(:,i) + hdti*ddustprop(:,i)
-          if (itype==igas) then
+          if (itype==igas .or. itype==isplit) then
              if (mhd)          Bevol(:,i) = Bevol(:,i) + hdti*dBevol(:,i)
              if (do_radiation) rad(:,i)   = rad(:,i)   + hdti*drad(:,i)
              if (use_dustfrac) then
@@ -580,7 +579,7 @@ npart = npart + add_npart
           endif
 
           if (itype==idust .and. use_dustgrowth) dustprop(:,i) = dustprop(:,i) + hdtsph*ddustprop(:,i)
-          if (itype==igas) then
+          if (itype==igas .or. itype==isplit) then
              !
              ! corrector step for magnetic field and dust
              !
@@ -650,7 +649,7 @@ npart = npart + add_npart
              vxyzu(:,i) = vxyzu(:,i) - hdtsph*fxyzu(:,i)
           endif
           if (itype==idust .and. use_dustgrowth) dustprop(:,i) = dustprop(:,i) - hdtsph*ddustprop(:,i)
-          if (itype==igas) then
+          if (itype==igas .or. itype==isplit) then
              if (mhd)          Bevol(:,i)  = Bevol(:,i)  - hdtsph*dBevol(:,i)
              if (use_dustfrac) then
                 dustevol(:,i) = dustevol(:,i) - hdtsph*ddustevol(:,i)

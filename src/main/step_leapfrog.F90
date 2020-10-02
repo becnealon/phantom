@@ -100,7 +100,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  use options,        only:idamp,iexternalforce,icooling,use_dustfrac
  use part,           only:xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,Bevol,dBevol, &
                           rad,drad,radprop,isdead_or_accreted,rhoh,dhdrho,&
-                          iphase,iamtype,massoftype,maxphase,igas,idust,isplit,mhd,&
+                          iphase,iamtype,massoftype,maxphase,igas,idust,isplit,ighost,isplitghost,mhd,&
                           iamboundary,get_ntypes,npartoftype,&
                           dustfrac,dustevol,ddustevol,eos_vars,alphaind,nptmass,&
                           dustprop,ddustprop,dustproppred,ndustsmall,pxyzu,dens,metrics,ics
@@ -162,7 +162,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  integer :: ihavemerged,ihavemergedghosts,ihavesplit,ihavesplitghosts
 #endif
  integer, parameter :: maxits = 30
- logical            :: converged,store_itype
+ logical            :: converged,store_itype,evol_split
 !
 ! set initial quantities
 !
@@ -188,6 +188,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  pmassi  = massoftype(itype)
  store_itype = (maxphase==maxp .and. ntypes > 1)
  ialphaloc = 2
+ evol_split = .false.
  !$omp parallel do default(none) &
  !$omp shared(npart,xyzh,vxyzu,fxyzu,iphase,hdtsph,store_itype) &
  !$omp shared(rad,drad,pxyzu)&
@@ -196,7 +197,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #ifdef IND_TIMESTEPS
  !$omp shared(ibin,ibin_old,twas,timei) &
 #endif
- !$omp firstprivate(itype) &
+ !$omp firstprivate(itype,evol_split) &
  !$omp private(i,hdti)
  predictor: do i=1,npart
     if (.not.isdead_or_accreted(xyzh(4,i))) then
@@ -211,6 +212,9 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #endif
        if (store_itype) itype = iamtype(iphase(i))
        if (iamboundary(itype)) cycle predictor
+#ifdef SPLITTING
+       evol_split = (itype==isplit) .or. (itype==ighost) .or. (itype==isplitghost)
+#endif
        !
        ! predict v and u to the half step with "slow" forces
        !
@@ -223,7 +227,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
        if (itype==idust .and. use_dustgrowth) then
           dustprop(:,i) = dustprop(:,i) + hdti*ddustprop(:,i)
        endif
-       if (itype==igas .or. itype==isplit) then
+       if (itype==igas .or. evol_split) then
           if (mhd)          Bevol(:,i) = Bevol(:,i) + hdti*dBevol(:,i)
           if (do_radiation) rad(:,i)   = rad(:,i) + hdti*drad(:,i)
           if (use_dustfrac) then
@@ -293,7 +297,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 !$omp shared(rad,drad,radpred)&
 !$omp private(hi,rhoi,tdecay1,source,ddenom,hdti) &
 !$omp private(i,spsoundi,alphaloci,divvdti) &
-!$omp firstprivate(pmassi,itype,avdecayconst,alpha)
+!$omp firstprivate(pmassi,itype,avdecayconst,alpha,evol_split)
  predict_sph: do i=1,npart
     if (.not.isdead_or_accreted(xyzh(4,i))) then
        if (store_itype) then
@@ -312,6 +316,9 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
              cycle predict_sph
           endif
        endif
+#ifdef SPLITTING
+       evol_split = (itype==isplit) .or. (itype==ighost) .or. (itype==isplitghost)
+#endif
        !
        ! make prediction for h
        !
@@ -338,7 +345,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
        if (use_dustgrowth .and. itype==idust) then
           dustproppred(:,i) = dustprop(:,i) + hdti*ddustprop(:,i)
        endif
-       if (itype==igas .or. itype==isplit) then
+       if (itype==igas .or. evol_split) then
           if (mhd) Bpred(:,i) = Bevol (:,i) + hdti*dBevol(:,i)
           if (use_dustfrac) then
              rhoi          = rhoh(xyzh(4,i),pmassi)
@@ -444,6 +451,7 @@ npart = npart + add_npart
     ntypes  = get_ntypes(npartoftype)
     store_itype = (maxphase==maxp .and. ntypes > 1)
     nwake   = 0
+    evol_split = .false.
 !$omp parallel default(none) &
 !$omp shared(xyzh,vxyzu,vpred,fxyzu,npart,hdtsph,store_itype) &
 !$omp shared(pxyzu,ppred) &
@@ -463,12 +471,15 @@ npart = npart + add_npart
 !$omp private(erri,v2i,eni) &
 !$omp reduction(max:errmax) &
 !$omp reduction(+:np,v2mean,p2mean,nwake) &
-!$omp firstprivate(pmassi,itype)
+!$omp firstprivate(pmassi,itype,evol_split)
 !$omp do
     corrector: do i=1,npart
        if (.not.isdead_or_accreted(xyzh(4,i))) then
           if (store_itype) itype = iamtype(iphase(i))
           if (iamboundary(itype)) cycle corrector
+#ifdef SPLITTING
+          evol_split = (itype==isplit) .or. (itype==ighost) .or. (itype==isplitghost)
+#endif
 #ifdef IND_TIMESTEPS
           !
           !--update active particles
@@ -494,7 +505,7 @@ npart = npart + add_npart
              endif
 
              if (use_dustgrowth .and. itype==idust) dustprop(:,i) = dustprop(:,i) + dti*ddustprop(:,i)
-             if (itype==igas .or. itype==isplit) then
+             if (itype==igas .or. evol_split) then
                 if (mhd)          Bevol(:,i) = Bevol(:,i) + dti*dBevol(:,i)
                 if (do_radiation) rad(:,i)   = rad(:,i)   + dti*drad(:,i)
                 if (use_dustfrac) then
@@ -515,7 +526,7 @@ npart = npart + add_npart
              vxyzu(:,i) = vxyzu(:,i) + hdti*fxyzu(:,i)
           endif
           if (itype==idust .and. use_dustgrowth) dustprop(:,i) = dustprop(:,i) + hdti*ddustprop(:,i)
-          if (itype==igas .or. itype==isplit) then
+          if (itype==igas .or. evol_split) then
              if (mhd)          Bevol(:,i) = Bevol(:,i) + hdti*dBevol(:,i)
              if (do_radiation) rad(:,i)   = rad(:,i)   + hdti*drad(:,i)
              if (use_dustfrac) then
@@ -579,7 +590,7 @@ npart = npart + add_npart
           endif
 
           if (itype==idust .and. use_dustgrowth) dustprop(:,i) = dustprop(:,i) + hdtsph*ddustprop(:,i)
-          if (itype==igas .or. itype==isplit) then
+          if (itype==igas .or. evol_split) then
              !
              ! corrector step for magnetic field and dust
              !
@@ -611,11 +622,14 @@ npart = npart + add_npart
 !$omp shared(Bevol,dBevol,Bpred,pxyzu,ppred) &
 !$omp shared(dustprop,ddustprop,dustproppred,use_dustfrac,dustevol,dustpred,ddustevol) &
 !$omp shared(rad,drad,radpred) &
-!$omp firstprivate(itype) &
+!$omp firstprivate(itype,evol_split) &
 !$omp schedule(static)
        until_converged: do i=1,npart
           if (store_itype) itype = iamtype(iphase(i))
           if (iamboundary(itype)) cycle until_converged
+#ifdef SPLITTING
+          evol_split = (itype==isplit) .or. (itype==ighost) .or. (itype==isplitghost)
+#endif
 
 #ifdef IND_TIMESTEPS
           if (iactive(iphase(i))) then
@@ -649,7 +663,7 @@ npart = npart + add_npart
              vxyzu(:,i) = vxyzu(:,i) - hdtsph*fxyzu(:,i)
           endif
           if (itype==idust .and. use_dustgrowth) dustprop(:,i) = dustprop(:,i) - hdtsph*ddustprop(:,i)
-          if (itype==igas .or. itype==isplit) then
+          if (itype==igas .or. evol_split) then
              if (mhd)          Bevol(:,i)  = Bevol(:,i)  - hdtsph*dBevol(:,i)
              if (use_dustfrac) then
                 dustevol(:,i) = dustevol(:,i) - hdtsph*ddustevol(:,i)

@@ -23,7 +23,7 @@ module split
  implicit none
 
  public :: init_split,write_options_splitting,read_options_splitting
- public :: check_split_or_merge,check_ghost_or_splitghost
+ public :: check_split_or_merge,check_ghost_or_splitghost,compare_reals_and_ghosts
 
  private
 
@@ -84,8 +84,6 @@ npart = npart + add_npart
 
 print*,'particle splitting is on, you now have',npart,'total particles'
 
-end subroutine init_split
-
 !----------------------------------------------------------------
 !+
 !  determines whether a particle should be split or merged, then
@@ -93,7 +91,7 @@ end subroutine init_split
 !+
 !----------------------------------------------------------------
 subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
-  use part, only:set_particle_type,iamtype,shuffle_part
+  use part, only:set_particle_type,iamtype
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
@@ -378,5 +376,63 @@ subroutine read_options_splitbox(name,valstring,imatch,igotsplitbox,ierr)
  igotsplitbox = (ngot >= 1)
 
 end subroutine read_options_splitbox
+
+end subroutine init_split
+
+!-----------------------------------------------------------------------
+!+
+!  Testing routine to calculate the mean density for the particles in the
+!  ghost region, prints out the percentage difference between ghosts and
+!  reals in comparable region
+!+
+!-----------------------------------------------------------------------
+
+subroutine compare_reals_and_ghosts(xyzh,npart)
+  use part, only:massoftype,rhoh,iamtype,igas,isplit,ighost,isplitghost
+  real, intent(in) :: xyzh(:,:)
+  integer, intent(in) :: npart
+  real :: m_gas,m_splits,m_ghosts,m_splitghosts
+  integer :: ii,itype,gas, splits,ghosts,splitghosts
+  logical :: ghost_it
+
+  m_gas = 0.
+  gas = 0
+  m_splits = 0.
+  splits = 0
+  m_ghosts = 0.
+  ghosts = 0
+  m_splitghosts = 0.
+  splitghosts = 0
+
+  do ii = 1,npart
+    call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
+    if (ghost_it) then
+      itype = iamtype(iphase(ii))
+      if (itype==igas) then
+          m_gas = m_gas + rhoh(xyzh(4,ii),massoftype(igas))
+          gas = gas + 1
+      elseif (itype==isplit) then
+          m_splits = m_splits + rhoh(xyzh(4,ii),massoftype(isplit))
+          splits = splits + 1
+      elseif (itype==ighost) then
+          m_ghosts = m_ghosts + rhoh(xyzh(4,ii),massoftype(ighost))
+          ghosts = ghosts + 1
+      elseif (itype==isplitghost) then
+          m_splitghosts = m_splitghosts + rhoh(xyzh(4,ii),massoftype(isplitghost))
+          splitghosts = splitghosts + 1
+      endif
+    endif
+  enddo
+
+  m_gas = m_gas/gas
+  m_splits = m_splits/splits
+  m_ghosts = m_ghosts/ghosts
+  m_splitghosts = m_splitghosts/splitghosts
+
+  print*,'-----------------------------------------------'
+  print*,'Outside boundary',(m_gas/m_splitghosts)*100.
+  print*,'Inside boundary',(m_splits/m_ghosts)*100.
+  print*,'-----------------------------------------------'
+end subroutine compare_reals_and_ghosts
 
 end module split

@@ -128,7 +128,7 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #endif
 #ifdef SPLITTING
  use part,           only:shuffle_part,iamghost,npartoftype,iamsplit,iactive,iamghost,kill_particle
- use split,          only:check_split_or_merge,check_ghost_or_splitghost,inside_ghost_zone
+ use split,          only:check_split_or_merge,check_ghost_or_splitghost
  use dim,            only:maxp_hard
 #endif
  use timing,         only:increment_timer,get_timings
@@ -378,8 +378,7 @@ split_loop: do i=1,npart
     cycle split_loop
   endif
   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
-    call check_split_or_merge(i,iphase(i),xyzh,vxyzu,npart,npartoftype,&
-    merge_count,add_npart)
+    call check_split_or_merge(i,iphase(i),xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
   endif
 enddo split_loop
 npart = npart + add_npart
@@ -388,8 +387,7 @@ call shuffle_part(npart)
 add_npart = 0
 do i = 1,npart
   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
-    call check_ghost_or_splitghost(i,iphase(i),xyzh,vxyzu,npart,npartoftype,&
-    merge_ghost_count,add_npart)
+    call check_ghost_or_splitghost(i,iphase(i),xyzh,vxyzu,npart,npartoftype,merge_ghost_count,add_npart)
   endif
 enddo
 npart = npart + add_npart

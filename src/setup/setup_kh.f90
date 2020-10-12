@@ -60,7 +60,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  character(len=20), intent(in)    :: fileprefix
  real,              intent(out)   :: vxyzu(:,:)
  character(len=26)                :: filename
- logical :: iexist
+ logical :: iexist,is_kh
  integer :: i,maxp,maxvxyzu,npartx
  real    :: totmass,deltax
 !
@@ -68,6 +68,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
 !
  time  = 0.
  gamma = 5./3
+ polyk = 0.
  filename= trim(fileprefix)//'.in'
  inquire(file=filename,exist=iexist)
  if (.not. iexist) then
@@ -75,6 +76,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
     dtmax     = 0.1
     nfulldump = 1
  endif
+ is_kh = .false.
 !
 !--set particles
 !
@@ -89,14 +91,22 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
 !
 !--boundary
 !
- call set_boundary(0.,xsize,0.,ysize,-2.*sqrt(6.)/npartx,2.*sqrt(6.)/npartx)
-
+ if (is_kh) then
+    call set_boundary(0.,xsize,0.,ysize,-2.*sqrt(6.)/npartx,2.*sqrt(6.)/npartx)
+ else
+    call set_boundary(-xsize/2,xsize/2,-xsize/2,xsize/2,-xsize/2,xsize/2)
+ endif
  npart = 0
  npart_total = 0
- call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
-                  deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
-                  rhofunc=rhofunc,dir=2,mask=i_belong)
-
+ if (is_kh) then
+    call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
+                     deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
+                     rhofunc=rhofunc,dir=2,mask=i_belong)
+ else
+    call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
+                     deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
+                     mask=i_belong)
+ endif
  npartoftype(:) = 0
  npartoftype(1) = npart
  print*,' npart = ',npart,npart_total
@@ -106,11 +116,20 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  print*,' particle mass = ',massoftype(1)
 
  do i=1,npart
-    vxyzu(1,i) = v1 + Rfunc(xyzh(2,i))*(v2 - v1)
-    vxyzu(2,i) = 0.1*sin(2.*pi*xyzh(1,i))
-    vxyzu(3,i) = 0.
-    if (maxvxyzu > 3) then
-       vxyzu(4,i) = przero/((gamma - 1.)*rhofunc(xyzh(2,i)))
+    if (is_kh) then
+       vxyzu(1,i) = v1 + Rfunc(xyzh(2,i))*(v2 - v1)
+       vxyzu(2,i) = 0.1*sin(2.*pi*xyzh(1,i))
+       vxyzu(3,i) = 0.
+       if (maxvxyzu > 3) then
+          vxyzu(4,i) = przero/((gamma - 1.)*rhofunc(xyzh(2,i)))
+       endif
+    else
+       vxyzu(1,i) = v1
+       vxyzu(2,i) = 0.
+       vxyzu(3,i) = 0.
+       if (maxvxyzu > 3) then
+          vxyzu(4,i) = przero/((gamma - 1.)*rho1)
+       endif
     endif
  enddo
 

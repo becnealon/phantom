@@ -84,6 +84,9 @@ npart = npart + add_npart
 
 print*,'particle splitting is on, you now have',npart,'total particles'
 
+end subroutine init_split
+
+
 !----------------------------------------------------------------
 !+
 !  determines whether a particle should be split or merged, then
@@ -376,8 +379,6 @@ subroutine read_options_splitbox(name,valstring,imatch,igotsplitbox,ierr)
  igotsplitbox = (ngot >= 1)
 
 end subroutine read_options_splitbox
-
-end subroutine init_split
 
 !-----------------------------------------------------------------------
 !+

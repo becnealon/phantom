@@ -40,11 +40,11 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  integer    :: ii
  logical    :: iexist
  real, save :: t_old = -1.,ctheta_pred
- real       :: sum_dJdt(3),pmass,fixed_BH(3),Li(3),r,dJdti(3)
+ real       :: sum_dJdt(3),pmass,fixed_BH(3),Li(3),r
  real       :: xi(3),vi(3),dJdt_mag,dJdt_unit(3),L_star(3),dcthetadt,dt,ctheta
  real       :: L_star_unit(3),R_star(3),R_star_mag,R_star3,temp(3)
  real       :: gamma,t_b,R_b,t_inspiral,f,L_tot(3),fixed_BH_unit(3),vec_mag
- real       :: J(3),rotate_about_z,rotate_about_y,L_unit(3),J_unit(3)
+ real       :: J(3),rotate_about_z,rotate_about_y,L_unit(3),J_unit(3),sum_term(3)
  character(len=40) :: filename
 
  ! initialise
@@ -58,9 +58,9 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
  ! NB: G=c=1 because iexternalforce=9,11
  fixed_BH = (/blackhole_spin*sin_spinangle,0.,blackhole_spin*cos_spinangle/)
  fixed_BH_unit = fixed_BH/sqrt(dot_product(fixed_BH,fixed_BH))
- sum_dJdt = 0.
  pmass = massoftype(igas)
  L_tot = 0.
+ sum_term = 0.
 
  do ii=1,npart
    xi = xyzh(1:3,ii)
@@ -68,15 +68,15 @@ subroutine do_analysis(dumpfile,num,xyzh,vxyzu,particlemass,npart,time,iunit)
    r = sqrt(dot_product(xi,xi))
    call cross_product3D(xi,vi,Li)
    Li = pmass*Li
-   call cross_product3D(fixed_BH,Li,dJdti)
-
-   sum_dJdt = sum_dJdt + dJdti/(r**2)
+   sum_term = Li/(r**3)
    L_tot = L_tot + Li
  enddo
- sum_dJdt = -sum_dJdt*4.*pi
+ call cross_product3D(fixed_BH,sum_term,sum_dJdt)
+ sum_dJdt = -2.*sum_dJdt
 
  ! calculate dctheta/dt, equation 38
  dJdt_mag = sqrt(dot_product(sum_dJdt,sum_dJdt))
+
  dJdt_unit = sum_dJdt/dJdt_mag
  call cross_product3D(xyzmh_ptmass(1:3,1),vxyz_ptmass(1:3,1),L_star)
  L_star = xyzmh_ptmass(4,1)*L_star
@@ -118,9 +118,12 @@ J = fixed_BH + sum_dJdt*dt !where J "should" be
 temp = (/J(1),J(2),0./)
 vec_mag = sqrt(dot_product(temp,temp))
 ! rotation in the x-y plane, lines J up with x-axis
-rotate_about_z = -acos(dot_product((/1.,0.,0./),temp/vec_mag))*sign(1.0,temp(2))
+if (vec_mag < tiny(vec_mag)) then
+  rotate_about_z = -acos(dot_product((/1.,0.,0./),temp))*sign(1.0,temp(2))
+else
+  rotate_about_z = -acos(dot_product((/1.,0.,0./),temp/vec_mag))*sign(1.0,temp(2))
+endif
 call rotatevec(J,(/0.,0.,1.0/),rotate_about_z)
-
 vec_mag = sqrt(dot_product(J,J))
 J_unit = J/vec_mag
 ! rotation in z-x plane, lines J up with fixed_BH position
@@ -128,7 +131,6 @@ rotate_about_y = -acos(dot_product((fixed_BH_unit),J_unit))
 ! this is required if the BH is retrograde
 if (J_unit(1) > 0. .and. cos_spinangle < 0.) rotate_about_y = -rotate_about_y
 call rotatevec(J,(/0.,1.,0./),rotate_about_y)
-
 ! now we have angles, rotate the star
 call rotate_it(xyzmh_ptmass(1:3,1),vxyz_ptmass(1:3,1),rotate_about_z,rotate_about_y)
 

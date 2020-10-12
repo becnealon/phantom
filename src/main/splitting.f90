@@ -83,6 +83,7 @@ enddo
 npart = npart + add_npart
 
 print*,'particle splitting is on, you now have',npart,'total particles'
+print*,'using randomisation type ',rand_type
 
 end subroutine init_split
 
@@ -94,12 +95,14 @@ end subroutine init_split
 !+
 !----------------------------------------------------------------
 subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_count,add_npart)
-  use part, only:set_particle_type,iamtype
+  use part, only:set_particle_type,iamtype,shuffle_part,kill_particle
+  use random, only:ran2
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer, intent(inout) :: npartoftype(:),npart
   integer, intent(inout) :: merge_count,add_npart
+  integer :: ilucky, seed
   logical :: already_split,split_it
 
   call inside_boundary(xyzh(1:3,ii),split_it)
@@ -112,13 +115,26 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_c
 
   ! if it should not be split, but already is, merge it
   else if (.not.split_it .and. already_split) then
-    merge_count = merge_count + 1
-    children_list(merge_count) = ii
-    if (merge_count == nchild+1) then
-      call fast_merge_into_a_particle(nchild+1,children_list,npart, &
-                                      xyzh,vxyzu,npartoftype,ii)
-      merge_count = 0
-    endif
+    if (rand_type==2) then
+        ilucky = int(ran2(seed)*(nchild))+1
+        if (ilucky==1) then
+           ! particle becomes merged
+           xyzh(4,ii) = xyzh(4,ii) * (nchild)**(1./3.)
+           call set_particle_type(ii,igas)
+           npartoftype(igas) = npartoftype(igas) + 1
+           npartoftype(isplit) = npartoftype(isplit) - 1
+        else
+           ! die, particle, die!
+           call kill_particle(ii,npartoftype(:))
+        endif
+    else
+       merge_count = merge_count + 1
+       children_list(merge_count) = ii
+       if (merge_count == nchild+1) then
+         call fast_merge_into_a_particle(nchild+1,children_list,npart,xyzh,vxyzu,npartoftype,ii)
+         merge_count = 0
+       endif
+     endif
   endif
 
 end subroutine check_split_or_merge
@@ -133,11 +149,13 @@ end subroutine check_split_or_merge
 subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,&
   npartoftype,merge_ghost_count,add_npart)
   use part, only:set_particle_type
+  use random, only:ran2
   integer, intent(in)    :: ii
   integer(kind=1), intent(in) :: iphaseii
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer, intent(inout) :: npartoftype(:),npart
   integer, intent(inout) :: add_npart,merge_ghost_count
+  integer :: ilucky,seed
   logical :: already_split,ghost_it,already_ghost
 
   call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
@@ -146,11 +164,27 @@ subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,&
     already_split = iamsplit(iphaseii)
     ! this is inside the boundary and should be merged (just use the original parent)
     if (already_split) then
-      merge_ghost_count = merge_ghost_count + 1
-      if (merge_ghost_count == nchild+1) then
-        call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild+1,xyzh)
-        merge_ghost_count = 0
-        add_npart = add_npart + 1
+      if (rand_type==2) then
+        ilucky = int(ran2(seed)*(nchild))+1
+        if (ilucky==1) then
+           call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild+1,xyzh)
+           add_npart = add_npart + 1
+        endif
+      else
+         merge_ghost_count = merge_ghost_count + 1
+         children_list(merge_ghost_count) = ii
+         if (merge_ghost_count == nchild+1) then
+            if (rand_type==1) then
+               ilucky = int(ran2(seed)*(nchild+1))+1
+               ilucky = children_list(ilucky)
+               !print*, ilucky,children_list(ilucky)
+            else
+               ilucky = ii
+            endif
+            call make_a_ghost(npart+add_npart+1,ilucky,npartoftype,npart,nchild+1,xyzh)
+            merge_ghost_count = 0
+            add_npart = add_npart + 1
+         endif
       endif
     ! this is outside the boundary and should be split
     else if (.not.already_split) then

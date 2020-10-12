@@ -17,6 +17,8 @@ module splitmergeutils
 ! :Dependencies: icosahedron, kernel, part, random
 !
  implicit none
+ integer, public :: rand_type = 1
+  ! 0==no randomness; 1 = 1 of every 12 randomly selected; 2 = dice rolled each time
 
 contains
 
@@ -213,14 +215,25 @@ end subroutine fancy_merge_into_a_particle
 subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
            xyzh,vxyzu,npartoftype,iparent)
  use part,   only:copy_particle_all,kill_particle,igas,isplit,set_particle_type
+ use random, only:ran2
  integer, intent(in)    :: nchild,ichildren(nchild),iparent
  integer, intent(inout) :: npart
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(inout) :: npartoftype(:)
- integer :: i
+ integer :: i,ilucky,seed
 
- ! lucky last child becomes parent
- xyzh(4,iparent) = xyzh(4,ichildren(nchild)) * (nchild)**(1./3.)
+ if (rand_type==0) then
+    ! lucky last child becomes parent
+    xyzh(4,iparent) = xyzh(4,ichildren(nchild)) * (nchild)**(1./3.)
+ elseif (rand_type==1) then
+    ! randomly pick a child to become the parent
+    ilucky = int(ran2(seed)*(nchild))+1
+    call copy_particle_all(ichildren(ilucky),iparent)
+    xyzh(4,iparent) = xyzh(4,iparent) * (nchild)**(1./3.)
+ else
+    print*, 'invalid random type',rand_type
+    stop
+ endif
  call set_particle_type(iparent,igas)
 
  ! kill the useless children

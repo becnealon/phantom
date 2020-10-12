@@ -833,6 +833,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
  use dim,         only:maxalpha,maxp,mhd_nonideal,gravity,gr
  use part,        only:rhoh,dvdx
  use nicil,       only:nimhd_get_jcbcb,nimhd_get_dBdt
+ use eos,         only:ieos,eos_is_non_ideal
 #ifdef GRAVITY
  use kernel,      only:kernel_softening
  use ptmass,      only:ptmass_not_obscured
@@ -1280,7 +1281,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
 
        if ((iamgasj .or. iamsplitj) .and. maxvxyzu >= 4) then
           enj   = vxyzu(4,j)
-          if (store_temperature) then
+          if (store_temperature .and. eos_is_non_ideal(ieos)) then
              tempj = eos_vars(itemp,j)
              denij = 0.5*(eni/tempi + enj/tempj)*(tempi - tempj)  ! dU = c_V * dT
           else

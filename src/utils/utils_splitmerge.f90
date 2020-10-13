@@ -31,11 +31,15 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
            npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
  use part,        only:copy_particle_all,igas,isplit,set_particle_type
+ use random,      only:ran2
+ use physcon,     only:pi
+ use vectorutils, only:rotatevec
  integer, intent(in)    :: nchild,iparent,lattice_type,ires,ichildren
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer, intent(inout) :: npartoftype(:)
- integer :: j,iseed,ichild
+ integer :: j,iseed,ichild,anotherseed
  real    :: dhfac,dx(3),sep,geodesic_R(0:19,3,3), geodesic_v(0:11,3),hchild
+ real    :: gamma,beta
 
  if (lattice_type == 0) then
     call compute_matrices(geodesic_R)
@@ -43,13 +47,15 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
  else
     ! initialise random number generator
     iseed = -6542
+    anotherseed = -2845
  endif
 
  dhfac = 1./(nchild+1)**(1./3.)
  hchild = xyzh(4,iparent)*dhfac
  sep = 1.5*hchild
  ichild = 0
-
+ beta = ran2(iseed)*2.*pi
+ gamma = ran2(anotherseed)*2.*pi
 
  do j=0,nchild-1
     ichild = ichild + 1
@@ -62,6 +68,10 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
     else
        call sample_kernel(iseed,dx)
     endif
+
+    ! rotate the particles on the sphere (consistent for each sphere)
+    call rotatevec(dx,(/1.,0.,0./),gamma)
+    call rotatevec(dx,(/0.,1.0,0./),beta)
     xyzh(1:3,ichildren+ichild) = xyzh(1:3,iparent) + sep*dx(:)
     call set_particle_type(ichildren+ichild,isplit)
     xyzh(4,ichildren+ichild) = xyzh(4,iparent)*dhfac

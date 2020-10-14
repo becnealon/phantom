@@ -262,9 +262,9 @@ end subroutine fast_merge_into_a_particle
 ! make a new ghost particle from an existing particle
 !+
 !-----------------------------------------------------------------------
-subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh)
+subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild_in,xyzh)
   use part, only:copy_particle_all,set_particle_type,ighost
-  integer, intent(in)    :: iighost,nchild,ireal
+  integer, intent(in)    :: iighost,nchild_in,ireal
   integer, intent(inout) :: npartoftype(:),npart
   real, intent(inout)    :: xyzh(:,:)
 
@@ -272,7 +272,7 @@ subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh)
   npartoftype(ighost) = npartoftype(ighost) + 1
   call set_particle_type(iighost,ighost)
   ! adjust smoothing length
-  xyzh(4,iighost) = xyzh(4,iighost) * (nchild)**(1./3.)
+  xyzh(4,iighost) = xyzh(4,iighost) * (nchild_in)**(1./3.)
 
 end subroutine make_a_ghost
 

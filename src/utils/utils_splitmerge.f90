@@ -17,7 +17,7 @@ module splitmergeutils
 ! :Dependencies: icosahedron, kernel, part, random
 !
  implicit none
- integer, public :: rand_type = 1
+ integer, public :: rand_type = 2
   ! 0==no randomness; 1 = 1 of every 12 randomly selected; 2 = dice rolled each time
 
 contains
@@ -52,7 +52,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
 
  dhfac = 1./(nchild+1)**(1./3.)
  hchild = xyzh(4,iparent)*dhfac
- sep = 1.5*hchild
+ sep = 0.35*hparent
  ichild = 0
  beta = ran2(iseed)*2.*pi
  gamma = ran2(anotherseed)*2.*pi

@@ -52,7 +52,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
 
  dhfac = 1./(nchild+1)**(1./3.)
  hchild = xyzh(4,iparent)*dhfac
- sep = 0.35*hparent
+ sep = 0.35*xyzh(4,iparent)
  ichild = 0
  beta = ran2(iseed)*2.*pi
  gamma = ran2(anotherseed)*2.*pi

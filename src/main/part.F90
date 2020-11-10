@@ -1300,7 +1300,7 @@ subroutine delete_dead_or_accreted_particles(npart,npoftype)
  integer :: i
 
  do i=1,npart
-    if (isdead_or_accreted(xyzh(4,i))) call kill_particle(i,ntoftype)
+    if (isdead_or_accreted(xyzh(4,i))) call kill_particle(i,npoftype)
  enddo
  call shuffle_part(npart)
 

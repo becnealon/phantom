@@ -345,7 +345,7 @@ subroutine merge_particles_wrapper(npart,xyzh,npartoftype,make_ghost)
  enddo
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
 
- call merge_particles(npart,k,xyzh,xyzh_split,iorig,npartoftype,make_ghost)
+ if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,iorig,npartoftype,make_ghost)
 
  deallocate(xyzh_split)
  deallocate(iorig)
@@ -368,11 +368,7 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
  real,    intent(inout) :: xyzh(:,:),xyzh_split(:,:)
  logical, intent(in)    :: make_ghost
  integer, intent(in)    :: iorig(:)
-#ifdef MPI
- integer, intent(inout) :: ncandiate
-#else
- integer, intent(in)    :: ncandiate
-#endif
+ integer, intent(inout) :: ncandiate  ! needs to be inout to satisfy if MPI, but we can't have pre-processor statements in this .f90 file
  integer                :: i,j,k,icell,jmin,n_cell,iave(4)
  real                   :: r2,r2min,hmax,hcell
  type(cellforce)        :: cell

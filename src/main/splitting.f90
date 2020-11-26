@@ -368,7 +368,7 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
  real,    intent(inout) :: xyzh(:,:),xyzh_split(:,:)
  logical, intent(in)    :: make_ghost
  integer, intent(in)    :: ncandiate,iorig(:)
- integer                :: i,j,k,icell,jmin,iave(2)
+ integer                :: i,j,k,icell,jmin,n_cell,iave(4)
  real                   :: r2,r2min,hmax,hcell
  type(cellforce)        :: cell
 
@@ -377,13 +377,17 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
 
  ! Go through all the cells, and create a ghost .or. merge them
  ! in both cases, the new particle will be based upon the centre-most particle in the cell
- iave = 0
- hmax = 0.
+ iave    = 0
+ iave(3) = huge(iave(3))
+ hmax    = 0.
  over_cells: do icell=1,int(ncells)
     i = ifirstincell(icell)
     if (i <= 0) cycle over_cells !--skip empty cells AND inactive cells
+    n_cell = inoderange(2,icell)-inoderange(1,icell)+1
     iave(1) = iave(1) + 1
-    iave(2) = iave(2) + inoderange(2,icell)-inoderange(1,icell)+1
+    iave(2) = iave(2) + n_cell
+    iave(3) = min(iave(3),n_cell)
+    iave(4) = max(iave(4),n_cell)
     ! find centre-most particle
     call get_cell_location(icell,cell%xpos,cell%xsizei,cell%rcuti)
     call get_hmaxcell(icell,hcell)
@@ -420,7 +424,7 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
        enddo
     endif
  enddo over_cells
- print*, 'average per cell: ',iave(2)/iave(1)
+ print*, 'min, average, and maximum particles per cell: ',iave(3),float(iave(2))/float(iave(1)),iave(4)
 
 end subroutine merge_particles
 !----------------------------------------------------------------

@@ -47,7 +47,11 @@ subroutine generate_neighbour_lists(xyzh,vxyzu,npart,dumpfile,write_neighbour_li
  use boundary, only:dxbound,dybound,dzbound
 #endif
  real,             intent(in)     :: xyzh(:,:),vxyzu(:,:)
+#ifdef MPI
+ integer,          intent(inout)  :: npart
+#else
  integer,          intent(in)     :: npart
+#endif
  character(len=*), intent(in)     :: dumpfile
  logical,          intent(in)     :: write_neighbour_list
  real,allocatable, dimension(:,:) :: dumxyzh

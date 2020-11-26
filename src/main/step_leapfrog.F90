@@ -128,8 +128,10 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
 #endif
 #ifdef SPLITTING
  use part,           only:shuffle_part,iamghost,npartoftype,iamsplit,iactive,iamghost,kill_particle
- use split,          only:check_split_or_merge,check_ghost_or_splitghost
+ use split,          only:check_split_or_merge,check_ghost_or_splitghost,merge_particles_wrapper,update_splitting
+ use splitpart,      only:merge_all_particles
  use dim,            only:maxp_hard
+ use splitmergeutils,only:rand_type
 #endif
  use timing,         only:increment_timer,get_timings
  use derivutils,     only:timer_extf
@@ -372,6 +374,10 @@ subroutine step(npart,nactive,t,dtsph,dtextforce,dtnew)
  enddo predict_sph
  !$omp end parallel do
 #ifdef SPLITTING
+ if (rand_type==5) then
+    call update_splitting(npart,xyzh,vxyzu,npartoftype)
+ else
+
 split_loop: do i=1,npart
   if (iactive(iphase(i)) .and. iamghost(iphase(i))) then
     call kill_particle(i,npartoftype)
@@ -382,6 +388,9 @@ split_loop: do i=1,npart
   endif
 enddo split_loop
 npart = npart + add_npart
+if (rand_type==3) then
+   call merge_particles_wrapper(npart,xyzh,npartoftype,.false.)
+endif
 call shuffle_part(npart)
 
 add_npart = 0
@@ -391,6 +400,15 @@ do i = 1,npart
   endif
 enddo
 npart = npart + add_npart
+if (rand_type==3) then
+   call merge_particles_wrapper(npart,xyzh,npartoftype,.true.)
+endif
+if (rand_type==4) then
+   call merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu,13,npart,.true.)
+endif
+
+ endif ! endif rand_type==5
+
 #endif
 
  if (use_dustgrowth) call check_dustprop(npart,dustproppred(1,:))

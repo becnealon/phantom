@@ -115,8 +115,11 @@ module dim
  integer, parameter :: maxdusttypes = maxdustsmall + maxdustlarge
 
  ! kdtree
+#ifdef SPLITTING
+ integer, parameter :: minpart = 20 ! to merge or make ghosts, require an average of 13 particle per box
+#else
  integer, parameter :: minpart = 10
-
+#endif
  integer :: maxprad = 0
 
  integer, parameter :: &

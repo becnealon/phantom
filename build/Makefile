@@ -1728,7 +1728,7 @@ endif
 SRCGR=inverse4x4.f90 $(SRCMETRIC) metric_tools.f90 utils_gr.f90 cons2primsolver.f90
 
 
-SRCSPLIT= utils_splitmerge.f90 splitting.f90
+SRCSPLIT= utils_splitmerge.f90 utils_getneighbours.F90 splitpart.f90 splitting.f90
 
 SRCCHEM= fs_data.f90 mol_data.f90 utils_spline.f90 h2cooling.f90 h2chem.f90 cooling.F90
 

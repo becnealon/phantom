@@ -126,7 +126,7 @@ subroutine check_compile_time_settings(ierr)
  call error(string,'General relativity not compatible with turbulent driving.')
  ierr = 11
 #endif
-#ifdef DRIVING
+#ifdef SPLITTING
  call error(string,'General relativity not compatible with particle splitting.')
  ierr = 9
 #endif
@@ -152,6 +152,14 @@ subroutine check_compile_time_settings(ierr)
 #ifdef DUSTGROWTH
  if (.not. use_dustgrowth) call error(string,'-DDUSTGROWTH but use_dustgrowth = .false.')
 #endif
+
+#ifdef SPLITTING
+#ifdef MPI
+ call error(string,'MPI not compatible with particle splitting due to tree usage.')
+ ierr = 16
+#endif
+#endif
+
 
  return
 end subroutine check_compile_time_settings

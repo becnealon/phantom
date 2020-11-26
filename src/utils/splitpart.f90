@@ -17,7 +17,7 @@ module splitpart
 ! :Dependencies: getneighbours, io, part, splitmergeutils, timestep_ind
 !
 
- use splitmergeutils, only:split_a_particle,fancy_merge_into_a_particle
+ use splitmergeutils, only:split_a_particle,fancy_merge_into_a_particle,make_a_ghost
 
  implicit none
 
@@ -78,7 +78,7 @@ end subroutine split_all_particles
 
 subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
                                 nchild,nactive_here,fancy_merging)
- use part,          only:igas,kill_particle,delete_dead_or_accreted_particles
+ use part,          only:igas,isplit,iphase,kill_particle,delete_dead_or_accreted_particles
  use part,          only:isdead_or_accreted,copy_particle
  use timestep_ind,  only:nactive
  use io,            only:fatal,error
@@ -89,12 +89,14 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  logical, optional, intent(in) :: fancy_merging
  integer, optional, intent(in) :: nactive_here
- integer :: ierr,nparent,remainder, i,k
- integer :: on_list(npart), children_list(nchild)
+ real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
+ integer :: ierr,nparent,remainder, i,k,npart0
+ integer :: on_list(2*npart), children_list(nchild)
  integer :: neighbours(neighmax),neigh_count
  integer :: ichild,iparent,child_found,m
  real    :: rik(3),rik2,rikmax,r2_neighbours(neighmax)
  logical :: merge_stochastically,found
+ logical :: ghostify = .true.
 
  ierr = 0
 
@@ -114,6 +116,19 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
     print*,'Discarding inactive particles'
  endif
 
+ if (ghostify) then
+    allocate(xyzh_split(4,npart))
+    xyzh_split(:,1:npart) = xyzh(:,1:npart)
+    nactive = 0
+    do i = 1,npart
+       if (iphase(i)/=isplit) then
+          xyzh_split(4,i) = 0. ! so we only find neighbours of split particles
+       else
+          nactive = nactive + 1
+       endif
+    enddo
+ endif
+ print*, 'nactive,nchild=',nactive,nchild
  !-- check number of parent particles
  nparent = floor(real(nactive)/real(nchild))
  remainder = mod(nactive,nchild)
@@ -135,12 +150,13 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
  endif
 
  iparent = 0
- ichild = 0
+ ichild  = 0
  on_list = -1
+ i       = 0
+ npart0  = npart
  children_list = 0
- i = 0
- neighbours = 0
- neigh_count = 0
+ neighbours    = 0
+ neigh_count   = 0
 
  if (merge_stochastically) then
     !-- quick stochastic merging
@@ -152,13 +168,22 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
  else
     !-- slower merging that averages properties of children to find new parent
     !-- find all the neighbours first
-    call generate_neighbour_lists(xyzh,vxyzu,npart,'dummy',write_neighbour_list=.false.)
-
+    if (ghostify) then
+       call generate_neighbour_lists(xyzh_split,vxyzu,npart,'dummy',write_neighbour_list=.false.)
+    else
+       call generate_neighbour_lists(xyzh,vxyzu,npart,'dummy',write_neighbour_list=.false.)
+    endif
+    print*, 'Done generating neighbours'
+    print*, 'nparent = ',nparent
     !-- now find the children
-    over_parent: do while (iparent < nparent) ! until all the children are found
+!!!    over_parent: do while (iparent < nparent) ! until all the children are found  !if (.not.ghostify)
+    i = 0
+    over_parent: do while (i < npart0) ! if (ghostify)
        i = i + 1
        ! already on the list
+       if (xyzh_split(4,i) < epsilon(xyzh_split(4,i))) cycle over_parent! if (ghostify)
        if (on_list(i) > 0) cycle over_parent
+
 
        ! first child
        iparent = iparent + 1
@@ -195,7 +220,7 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
 
           ! otherwise, check everyone else
           if (.not.found) then
-             over_all: do k = 1,npart
+             over_all: do k = 1,npart0
                 if (on_list(k) > 0) cycle over_all
                 rik = xyzh(1:3,k) - xyzh(1:3,i)
                 rik2 = dot_product(rik,rik)
@@ -206,7 +231,6 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
              enddo over_all
              if (child_found > 0) found = .true.
           endif
-
           ! error if no children found for the parent particle
           if (.not.found) then
              call error('mergepart','no child found for parent particle')
@@ -220,33 +244,47 @@ subroutine merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu, &
        enddo finding_children
 
 
-       ! send in children, parent returns
-       ! parents temporarily stored after all the children
-       call fancy_merge_into_a_particle(nchild,children_list, massoftype(igas), &
-                               npart,xyzh,vxyzu,npartoftype,npart+iparent)
-
+       if (ghostify) then
+          ! copy central particle into a ghost
+          npart = npart + 1
+          call make_a_ghost(npart,i,npartoftype,npart,13,xyzh)
+       else
+          ! send in children, parent returns
+          ! parents temporarily stored after all the children
+          call fancy_merge_into_a_particle(nchild,children_list, massoftype(igas), &
+                                  npart,xyzh,vxyzu,npartoftype,npart+iparent)
+       endif
     enddo over_parent
  endif
 
- !-- move the new parents
- do i = 1,nparent
-    call copy_particle(npart+i,i)
- enddo
+ if (ghostify) then
+    deallocate(xyzh_split)
+ else
+    !-- move the new parents
+    do i = 1,nparent
+       call copy_particle(npart+i,i)
+    enddo
 
- !-- kill all the useless children
- do i=nparent+1,npart
-    call kill_particle(i,npartoftype)
- enddo
+    !-- kill all the useless children
+    do i=nparent+1,npart
+       call kill_particle(i,npartoftype)
+    enddo
 
- !--tidy up
- call delete_dead_or_accreted_particles(npart,npartoftype)
+    !--tidy up
+    call delete_dead_or_accreted_particles(npart,npartoftype)
 
- !--update npartoftype
- npartoftype(igas) = nparent
- npart = nparent
- massoftype(:) = massoftype(:) * nchild
-
+    !--update npartoftype
+    npartoftype(igas) = nparent
+    npart = nparent
+    massoftype(:) = massoftype(:) * nchild
+ endif
+ print*, 'DONE merge_all_particles'
  if (ierr /= 0) call fatal('moddump','could not merge particles')
+
+! I think this method is perfect by fluke.  To split, we convert a gas into a split, and add 12 splits at the end of the list.
+! In this case, since we go through i = 1,npart, we naturally run through all the former parents first, and remove their children.
+! So due to the placement of the children on the list, the above routine perfectly undoes what the merging did.  This will not happen
+! so smoothly in a live calculation.
 
 end subroutine merge_all_particles
 

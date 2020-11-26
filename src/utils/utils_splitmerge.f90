@@ -17,20 +17,24 @@ module splitmergeutils
 ! :Dependencies: icosahedron, kernel, part, random
 !
  implicit none
- integer, public :: rand_type = 2
-  ! 0==no randomness; 1 = 1 of every 12 randomly selected; 2 = dice rolled each time
+! integer, public :: rand_type = 0  ! no randomness: first out of every 13 particles is the parent  (A)
+! integer, public :: rand_type = 1  ! 1 of every 13 randomly selected for the parent (B)
+! integer, public :: rand_type = 2  ! dice rolled each time (C)
+! integer, public :: rand_type = 3  ! Use the tree in the nice code.  gas then splits (D)
+! integer, public :: rand_type = 4  ! Use the tree in the hacked code (E)
+ integer, public :: rand_type = 5  ! Use the tree in the nice code.  gas & splits simultaneously (F)
+ logical, public :: centre_particle = .true.
 
-contains
+ contains
 
 !--------------------------------------------------------------------------
 !+
 !  splits a particle into nchild particles
 !+
 !--------------------------------------------------------------------------
-subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
-           npartoftype,lattice_type,ires,ichildren)
+subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
- use part,        only:copy_particle_all,igas,isplit,set_particle_type
+ use part,        only:copy_particle_all,igas,isplit,set_particle_type,kill_particle
  use random,      only:ran2
  use physcon,     only:pi
  use vectorutils, only:rotatevec
@@ -44,18 +48,21 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
  if (lattice_type == 0) then
     call compute_matrices(geodesic_R)
     call compute_corners(geodesic_v)
- else
-    ! initialise random number generator
-    iseed = -6542
-    anotherseed = -2845
  endif
+ ! initialise random number generator
+ iseed       = -6542
+ anotherseed = -2845
 
- dhfac = 1./(nchild+1)**(1./3.)
+ if (centre_particle) then
+    dhfac = 1./(nchild+1)**(1./3.)
+ else
+    dhfac = 1./(nchild)**(1./3.)
+ endif
  hchild = xyzh(4,iparent)*dhfac
- sep = 0.35*xyzh(4,iparent)
+ sep    = 0.35*xyzh(4,iparent)
  ichild = 0
- beta = ran2(iseed)*2.*pi
- gamma = ran2(anotherseed)*2.*pi
+ beta   = acos(2.0*ran2(iseed)-1.0)
+ gamma  = 2.0*pi*ran2(anotherseed)
 
  do j=0,nchild-1
     ichild = ichild + 1
@@ -73,17 +80,23 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu, &
     call rotatevec(dx,(/1.,0.,0./),gamma)
     call rotatevec(dx,(/0.,1.0,0./),beta)
     xyzh(1:3,ichildren+ichild) = xyzh(1:3,iparent) + sep*dx(:)
+    xyzh(4,  ichildren+ichild) = xyzh(4,  iparent)*dhfac
     call set_particle_type(ichildren+ichild,isplit)
-    xyzh(4,ichildren+ichild) = xyzh(4,iparent)*dhfac
  enddo
+ npartoftype(isplit) = npartoftype(isplit) + nchild
 
- !--fix parent
- xyzh(4,iparent) = xyzh(4,iparent)*dhfac
- call set_particle_type(iparent,isplit)
+ if (centre_particle) then
+    !--fix parent
+    xyzh(4,iparent) = xyzh(4,iparent)*dhfac
+    call set_particle_type(iparent,isplit)
 
- !-- tidy up particle types
- npartoftype(igas) = npartoftype(igas) - 1
- npartoftype(isplit) = npartoftype(isplit) + nchild + 1
+    !-- tidy up particle types
+    npartoftype(igas)   = npartoftype(igas)   - 1
+    npartoftype(isplit) = npartoftype(isplit) + 1
+
+ else
+    call kill_particle(iparent,npartoftype(:))
+ endif
 
 end subroutine split_a_particle
 
@@ -289,12 +302,12 @@ subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
   integer :: jj
 
   call copy_particle_all(ireal,iighost)
-  call split_a_particle(nchild,iighost,xyzh,vxyzu, &
-             npartoftype,0,1,iighost)
+  call split_a_particle(nchild,iighost,xyzh,vxyzu,npartoftype,0,1,iighost)
   do jj = 0,nchild+1
     call set_particle_type(iighost+jj,isplitghost)
   enddo
   npartoftype(isplitghost) = npartoftype(isplitghost) + nchild + 1
+
   ! because split_a_particle is no longer generic
   npartoftype(igas) = npartoftype(igas) + 1
   npartoftype(isplit) = npartoftype(isplit) - nchild - 1

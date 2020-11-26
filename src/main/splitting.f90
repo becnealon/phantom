@@ -367,7 +367,12 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
  integer, intent(inout) :: npartoftype(:),npart
  real,    intent(inout) :: xyzh(:,:),xyzh_split(:,:)
  logical, intent(in)    :: make_ghost
- integer, intent(in)    :: ncandiate,iorig(:)
+ integer, intent(in)    :: iorig(:)
+#ifdef MPI
+ integer, intent(inout) :: ncandiate
+#else
+ integer, intent(in)    :: ncandiate
+#endif
  integer                :: i,j,k,icell,jmin,n_cell,iave(4)
  real                   :: r2,r2min,hmax,hcell
  type(cellforce)        :: cell

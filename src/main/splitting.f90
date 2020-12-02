@@ -120,7 +120,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer                :: i,k,add_npart
  logical                :: split_it,ghost_it,already_split,already_ghost,make_ghost
- integer, allocatable, dimension(:)   :: iorig(:)
+ integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
 
  if (rand_type /= 5) then
@@ -132,7 +132,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
  !  Convert gas <-> splits that have crossed the boundary
  !
  allocate(xyzh_split(4,npartoftype(isplit)))
- allocate(iorig(npartoftype(isplit)))
+ allocate(ioriginal(npartoftype(isplit)))
  k = 0
  add_npart = 0
  make_ghost = .false.
@@ -150,21 +150,21 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
        elseif (.not.split_it .and. already_split) then ! this should be only the split particles that need to be converted into gas particles
           k = k + 1
           xyzh_split(:,k) = xyzh(:,i)
-          iorig(k) = i
+          ioriginal(k) = i
        endif
     endif
  enddo split_loop
  npart = npart + add_npart
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
- if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,iorig,npartoftype,make_ghost)
+ if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
  call shuffle_part(npart)
  deallocate(xyzh_split)
- deallocate(iorig)
+ deallocate(ioriginal)
  !
  !--Go through list and create ghost particles as required
  !
  allocate(xyzh_split(4,npartoftype(isplit)))
- allocate(iorig(npartoftype(isplit)))
+ allocate(ioriginal(npartoftype(isplit)))
  k = 0
  add_npart = 0
  make_ghost = .true.
@@ -179,7 +179,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
              ! make list of particles to make ghost particles
              k = k + 1
              xyzh_split(:,k) = xyzh(:,i)
-             iorig(k) = i
+             ioriginal(k) = i
           else
              ! make splitghosts
              call make_split_ghost(npart+add_npart+1,i,npartoftype,npart,nchild,xyzh,vxyzu)
@@ -190,9 +190,9 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
  enddo ghost_loop
  npart = npart + add_npart
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
- if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,iorig,npartoftype,make_ghost)
+ if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
  deallocate(xyzh_split)
- deallocate(iorig)
+ deallocate(ioriginal)
 
 end subroutine update_splitting
 
@@ -314,13 +314,13 @@ subroutine merge_particles_wrapper(npart,xyzh,npartoftype,make_ghost)
  integer, intent(inout) :: npartoftype(:),npart
  real,    intent(inout) :: xyzh(:,:)
  logical, intent(in)    :: make_ghost
- integer, allocatable, dimension(:)   :: iorig(:)
+ integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
  integer :: i,k
  logical :: ghost_it,split_it
 
  allocate(xyzh_split(4,npartoftype(isplit))) ! we can be smarter and choose smaller arrays later
- allocate(iorig(npartoftype(isplit)))        ! we can be smarter and choose smaller arrays later
+ allocate(ioriginal(npartoftype(isplit)))        ! we can be smarter and choose smaller arrays later
 
  ! Determine the number of particles
  k = 0
@@ -331,24 +331,24 @@ subroutine merge_particles_wrapper(npart,xyzh,npartoftype,make_ghost)
           if (ghost_it) then ! this should be only the split particles that need to have ghosts made of them
              k = k + 1
              xyzh_split(:,k) = xyzh(:,i)
-             iorig(k) = i
+             ioriginal(k) = i
           endif
        else
           call inside_boundary(xyzh(1:3,i),split_it)
           if (.not. split_it) then ! this should be only the split particles that need to be converted into gas particles
              k = k + 1
              xyzh_split(:,k) = xyzh(:,i)
-             iorig(k) = i
+             ioriginal(k) = i
           endif
        endif
     endif
  enddo
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
 
- if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,iorig,npartoftype,make_ghost)
+ if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
 
  deallocate(xyzh_split)
- deallocate(iorig)
+ deallocate(ioriginal)
 
 end subroutine merge_particles_wrapper
 !----------------------------------------------------------------
@@ -359,7 +359,7 @@ end subroutine merge_particles_wrapper
 !  if make_ghosts = false, then merge split particles into gas particles
 !+
 !----------------------------------------------------------------
-subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,make_ghost)
+subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
  use linklist,       only:ncells,get_neighbour_list,get_hmaxcell,get_cell_location,set_linklist,ifirstincell
  use kdtree,         only:inodeparts,inoderange
  use part,           only:iactive,isdead_or_accreted,set_particle_type,kill_particle
@@ -367,7 +367,7 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
  integer, intent(inout) :: npartoftype(:),npart
  real,    intent(inout) :: xyzh(:,:),xyzh_split(:,:)
  logical, intent(in)    :: make_ghost
- integer, intent(in)    :: iorig(:)
+ integer, intent(in)    :: ioriginal(:)
  integer, intent(inout) :: ncandiate  ! needs to be inout to satisfy if MPI, but we can't have pre-processor statements in this .f90 file
  integer                :: i,j,k,icell,jmin,n_cell,iave(4)
  real                   :: r2,r2min,hmax,hcell
@@ -408,12 +408,12 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,iorig,npartoftype,mak
     enddo
     ! make a gas ghost from the splits OR merge splits into gas
     if (make_ghost) then
-       k = iorig(inodeparts(jmin))
+       k = ioriginal(inodeparts(jmin))
        npart = npart + 1
        call make_a_ghost(npart,k,npartoftype,npart,13,xyzh)
     else
        do j = inoderange(1,icell),inoderange(2,icell)
-          k = iorig(inodeparts(j))
+          k = ioriginal(inodeparts(j))
           if (j==jmin) then
              xyzh(4,k) = xyzh(4,k) * 13.**(1./3.)
              call set_particle_type(k,igas)

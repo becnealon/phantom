@@ -53,7 +53,7 @@ module evwrite
                            iev_B,iev_divB,iev_hdivB,iev_beta,iev_temp,iev_etaar,iev_etao,iev_etah,&
                            iev_etaa,iev_vel,iev_vhall,iev_vion,iev_vdrift,iev_n,iev_nR,iev_nT,&
                            iev_dtg,iev_ts,iev_dm,iev_momall,iev_angall,iev_angall,iev_maccsink,&
-                           iev_macc,iev_eacc,iev_totlum,iev_erot,iev_viscrat,iev_ionise,iev_erad,iev_gws
+                           iev_macc,iev_eacc,iev_totlum,iev_erot,iev_viscrat,iev_ionise,iev_erad,iev_gws,iev_mass
 
  implicit none
  public                    :: init_evfile, write_evfile, write_evlog
@@ -74,7 +74,7 @@ contains
 !----------------------------------------------------------------
 subroutine init_evfile(iunit,evfile,open_file)
  use io,        only: id,master,warning
- use dim,       only: maxtypes,maxalpha,maxp,mhd,mhd_nonideal,lightcurve, &
+ use dim,       only: maxtypes,maxalpha,maxp,maxp_hard,mhd,mhd_nonideal,lightcurve, &
                       use_CMacIonize,gws
  use options,   only: calc_erot,ishock_heating,ipdv_heating,use_dustfrac
  use part,      only: igas,idust,iboundary,istar,idarkmatter,ibulge,isplit,npartoftype,ndusttypes
@@ -112,6 +112,9 @@ subroutine init_evfile(iunit,evfile,open_file)
  call fill_ev_tag(ev_fmt,iev_dt,     'dt',       '0', i,j)
  if (dtmax_dratio > 0.) then
     call fill_ev_tag(ev_fmt,iev_dtx, 'dtmax',    '0', i,j)
+ endif
+ if (maxp==maxp_hard) then
+    call fill_ev_tag(ev_fmt,iev_mass,'mass',     '0', i,j)
  endif
  call fill_ev_tag(ev_fmt,iev_entrop, 'totentrop','s', i,j)
  call fill_ev_tag(ev_fmt,iev_rmsmach,'rmsmach',  '0', i,j)

@@ -20,7 +20,7 @@ module energies
 !   io, metric_tools, mpiutils, nicil, options, part, ptmass, units,
 !   utils_gr, vectorutils, viscosity
 !
- use dim, only: maxdusttypes,maxdustsmall
+ use dim,   only:maxdusttypes,maxdustsmall
  use units, only:utime
  implicit none
 
@@ -36,7 +36,7 @@ module energies
                                iev_alpha,iev_B,iev_divB,iev_hdivB,iev_beta,iev_temp,iev_etaar,iev_etao(2),iev_etah(4),&
                                iev_etaa(2),iev_vel,iev_vhall,iev_vion,iev_vdrift,iev_n(4),iev_nR(5),iev_nT(2),&
                                iev_dtg,iev_ts,iev_dm(maxdusttypes),iev_momall,iev_angall,iev_maccsink(2),&
-                               iev_macc,iev_eacc,iev_totlum,iev_erot(4),iev_viscrat,iev_ionise,iev_gws(4)
+                               iev_macc,iev_eacc,iev_totlum,iev_erot(4),iev_viscrat,iev_ionise,iev_gws(4),iev_mass
  integer,         public    :: iev_erad
  real,            public    :: erad
  integer,         parameter :: inumev  = 150  ! maximum number of quantities to be printed in .ev
@@ -58,7 +58,7 @@ contains
 !+
 !----------------------------------------------------------------
 subroutine compute_energies(t)
- use dim,            only:maxp,maxvxyzu,maxalpha,maxtypes,mhd_nonideal,&
+ use dim,            only:maxp,maxp_hard,maxvxyzu,maxalpha,maxtypes,mhd_nonideal,&
                           lightcurve,use_dust,use_CMacIonize,store_temperature,&
                           maxdusttypes,gws,do_radiation
  use part,           only:rhoh,xyzh,vxyzu,massoftype,npart,maxphase,iphase,&
@@ -89,6 +89,9 @@ subroutine compute_energies(t)
 #ifdef FINVSQRT
  use fastmath,       only:finvsqrt
 #endif
+#endif
+#ifdef SPLITTING
+ use part,           only:iamghost
 #endif
 #ifdef LIGHTCURVE
  use part,           only:luminosity
@@ -216,7 +219,11 @@ subroutine compute_energies(t)
     yi = xyzh(2,i)
     zi = xyzh(3,i)
     hi = xyzh(4,i)
+#ifdef SPLITTING
     if (.not.isdead_or_accreted(hi)) then
+#else
+    if (.not.isdead_or_accreted(hi) .and. .not.iamghost(iphase(i))) then
+#endif
        if (maxphase==maxp) then
           itype = iamtype(iphase(i))
           if (itype <= 0) call fatal('energies','particle type <= 0')
@@ -266,6 +273,7 @@ subroutine compute_energies(t)
        xmom = xmom + pmassi*pxi
        ymom = ymom + pmassi*pyi
        zmom = zmom + pmassi*pzi
+       mtot = mtot + pmassi
 
        call unpack_metric(metrics(:,:,:,i),betaUP=beta_gr_UP,alpha=alpha_gr,gammaijdown=gammaijdown)
        bigvi    = (vxyzu(1:3,i)+beta_gr_UP)/alpha_gr
@@ -615,7 +623,7 @@ subroutine compute_energies(t)
 !$omp end critical(collatedata)
 !$omp end parallel
 
- !--Determing the number of active gas particles
+ !--Determing the number of gas particles
  nptot    = reduceall_mpi('+',np)
  npgas    = reduceall_mpi('+',npgas)
  npartall = reduceall_mpi('+',npart)
@@ -764,6 +772,10 @@ subroutine compute_energies(t)
     ev_data(iev_sum,iev_gws(2)) = hp
     ev_data(iev_sum,iev_gws(3)) = hxx
     ev_data(iev_sum,iev_gws(4)) = hpp
+ endif
+
+ if (maxp==maxp_hard) then
+    ev_data(iev_sum,iev_mass) = ev_data(iev_sum,iev_mass) + mtot
  endif
 
  return

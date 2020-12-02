@@ -220,9 +220,9 @@ subroutine compute_energies(t)
     zi = xyzh(3,i)
     hi = xyzh(4,i)
 #ifdef SPLITTING
-    if (.not.isdead_or_accreted(hi)) then
-#else
     if (.not.isdead_or_accreted(hi) .and. .not.iamghost(iphase(i))) then
+#else
+    if (.not.isdead_or_accreted(hi)) then
 #endif
        if (maxphase==maxp) then
           itype = iamtype(iphase(i))

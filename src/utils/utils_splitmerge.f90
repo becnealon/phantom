@@ -67,7 +67,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,i
  do j=0,nchild-1
     ichild = ichild + 1
     ! copy properties
-    call copy_particle(iparent,ichildren+ichild,.true.)
+    call copy_particle_all(iparent,ichildren+ichild,.true.)
 
     ! adjust the position
     if (lattice_type == 0) then
@@ -183,7 +183,7 @@ subroutine fancy_merge_into_a_particle(nchild,ichildren,mchild,npart, &
  real    :: qij,rij,wchild,grkernchild,rho_parent
 
  !-- copy properties from first child
- call copy_particle(ichildren(1),iparent,.true.)
+ call copy_particle_all(ichildren(1),iparent,.true.)
 
  !-- positions and velocities from centre of mass
  xyzh(1:3,iparent) = 0.
@@ -281,7 +281,7 @@ subroutine make_a_ghost(iighost,ireal,npartoftype,npart,nchild_in,xyzh)
   integer, intent(inout) :: npartoftype(:),npart
   real, intent(inout)    :: xyzh(:,:)
 
-  call copy_particle_all(ireal,iighost)
+  call copy_particle_all(ireal,iighost,.true.)
   npartoftype(ighost) = npartoftype(ighost) + 1
   call set_particle_type(iighost,ighost)
   ! adjust smoothing length
@@ -301,7 +301,7 @@ subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
   real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
   integer :: jj
 
-  call copy_particle_all(ireal,iighost)
+  call copy_particle_all(ireal,iighost,.true.)
   call split_a_particle(nchild,iighost,xyzh,vxyzu,npartoftype,0,1,iighost)
   do jj = 0,nchild+1
     call set_particle_type(iighost+jj,isplitghost)

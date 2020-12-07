@@ -67,7 +67,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,i
  do j=0,nchild-1
     ichild = ichild + 1
     ! copy properties
-    call copy_particle_all(iparent,ichildren+ichild)
+    call copy_particle(iparent,ichildren+ichild,.true.)
 
     ! adjust the position
     if (lattice_type == 0) then
@@ -183,7 +183,7 @@ subroutine fancy_merge_into_a_particle(nchild,ichildren,mchild,npart, &
  real    :: qij,rij,wchild,grkernchild,rho_parent
 
  !-- copy properties from first child
- call copy_particle_all(ichildren(1),iparent)
+ call copy_particle(ichildren(1),iparent,.true.)
 
  !-- positions and velocities from centre of mass
  xyzh(1:3,iparent) = 0.
@@ -251,7 +251,7 @@ subroutine fast_merge_into_a_particle(nchild,ichildren,npart, &
  elseif (rand_type==1) then
     ! randomly pick a child to become the parent
     ilucky = int(ran2(seed)*(nchild))+1
-    call copy_particle_all(ichildren(ilucky),iparent)
+    call copy_particle_all(ichildren(ilucky),iparent,.true.)
     xyzh(4,iparent) = xyzh(4,iparent) * (nchild)**(1./3.)
  else
     print*, 'invalid random type',rand_type

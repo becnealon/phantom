@@ -153,7 +153,7 @@ subroutine get_distance_from_centre_of_mass(inode,xi,yi,zi,dx,dy,dz,xcen)
 
 end subroutine get_distance_from_centre_of_mass
 
-subroutine set_linklist(npart,nactive,xyzh,vxyzu)
+subroutine set_linklist(npart,nactive,xyzh,vxyzu,special_split)
  use dtypekdtree,  only:ndimtree
  use kdtree,       only:maketree
 #ifdef MPI
@@ -168,11 +168,16 @@ subroutine set_linklist(npart,nactive,xyzh,vxyzu)
  integer, intent(in)    :: nactive
  real,    intent(inout) :: xyzh(:,:)
  real,    intent(in)    :: vxyzu(:,:)
+ integer, optional, intent(in) :: special_split
+ integer :: split_test
+
+ split_test = 0
+ if (present(special_split)) split_test = special_split
 
 #ifdef MPI
  call maketreeglobal(nodeglobal,node,nodemap,globallevel,refinelevels,xyzh,npart,ndimtree,cellatid,ifirstincell,ncells)
 #else
- call maketree(node,xyzh,npart,ndimtree,ifirstincell,ncells)
+ call maketree(node,xyzh,npart,ndimtree,ifirstincell,ncells,split_test)
 #endif
 
 end subroutine set_linklist

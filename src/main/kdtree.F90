@@ -117,7 +117,7 @@ end subroutine deallocate_kdtree
 !  -implement revtree routine to update tree w/out rebuilding (done - Sep 2015)
 !+
 !-------------------------------------------------------------------------------
-subroutine maketree(node, xyzh, np, ndim, ifirstincell, ncells, refinelevels)
+subroutine maketree(node, xyzh, np, ndim, ifirstincell, ncells, split_test, refinelevels)
  use io,   only:fatal,warning,iprint,iverbose
 !$ use omp_lib
  type(kdnode),    intent(out)   :: node(:) !ncellsmax+1)
@@ -126,6 +126,7 @@ subroutine maketree(node, xyzh, np, ndim, ifirstincell, ncells, refinelevels)
  integer,         intent(out)   :: ifirstincell(:) !ncellsmax+1)
  integer(kind=8), intent(out)   :: ncells
  integer, optional, intent(out)  :: refinelevels
+ integer,         intent(in)    :: split_test
 
  integer :: i,npnode,il,ir,istack,nl,nr,mymum
  integer :: nnode,minlevel,level,nqueue
@@ -207,7 +208,7 @@ subroutine maketree(node, xyzh, np, ndim, ifirstincell, ncells, refinelevels)
     ! construct node
     call construct_node(node(nnode), nnode, mymum, level, xmini, xmaxi, npnode, .true., &  ! construct in parallel
             il, ir, nl, nr, xminl, xmaxl, xminr, xmaxr, &
-            ncells, ifirstincell, minlevel, maxlevel, ndim, xyzh, wassplit, list)
+            ncells, ifirstincell, minlevel, maxlevel, ndim, xyzh, wassplit, list, split_test)
 
     if (wassplit) then ! add children to back of queue
        if (istack+2 > istacksize) call fatal('maketree',&
@@ -234,7 +235,7 @@ subroutine maketree(node, xyzh, np, ndim, ifirstincell, ncells, refinelevels)
     !$omp shared(xyzh) &
     !$omp shared(np, ndim) &
     !$omp shared(node, ncells) &
-    !$omp shared(nqueue) &
+    !$omp shared(nqueue,split_test) &
     !$omp private(istack) &
     !$omp private(nnode, mymum, level, npnode, xmini, xmaxi) &
     !$omp private(ir, il, nl, nr) &
@@ -257,7 +258,7 @@ subroutine maketree(node, xyzh, np, ndim, ifirstincell, ncells, refinelevels)
           ! construct node
           call construct_node(node(nnode), nnode, mymum, level, xmini, xmaxi, npnode, .false., &  ! don't construct in parallel
               il, ir, nl, nr, xminl, xmaxl, xminr, xmaxr, &
-              ncells, ifirstincell, minlevel, maxlevel, ndim, xyzh, wassplit, list)
+              ncells, ifirstincell, minlevel, maxlevel, ndim, xyzh, wassplit, list, split_test)
 
           if (wassplit) then ! add children to top of stack
              if (istack+2 > istacksize) call fatal('maketree',&
@@ -467,7 +468,7 @@ end subroutine pop_off_stack
 subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, doparallel,&
             il, ir, nl, nr, xminl, xmaxl, xminr, xmaxr, &
             ncells, ifirstincell, minlevel, maxlevel, ndim, xyzh, wassplit, list, &
-            groupsize)
+            split_test,groupsize)
  use dim,       only:maxtypes
  use part,      only:massoftype,igas,iamtype,maxphase,maxp,npartoftype
  use io,        only:fatal,error
@@ -489,6 +490,7 @@ subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, 
  real,              intent(in)    :: xyzh(:,:)
  logical,           intent(out)   :: wassplit
  integer,           intent(out)   :: list(:) ! not actually sent out, but to avoid repeated memory allocation/deallocation
+ integer,           intent(in)    :: split_test
 
  real                           :: xyzcofm(ndim)
  real                           :: totmass_node
@@ -768,8 +770,14 @@ subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, 
        !call sort_old(iaxis,inoderange(1,nnode),inoderange(2,nnode),inoderange(1,il),inoderange(2,il),&
        !                         inoderange(1,ir),inoderange(2,ir),nl,nr,xpivot,xyzh_soa,iphase_soa,inodeparts)
        !print*,ir,inodeparts(inoderange(1,il):inoderange(2,il))
-       call sort_particles_in_cell(iaxis,inoderange(1,nnode),inoderange(2,nnode),inoderange(1,il),inoderange(2,il),&
+       if (split_test>0) then
+          call special_sort_particles_in_cell(iaxis,inoderange(1,nnode),inoderange(2,nnode),inoderange(1,il),&
+                                                   inoderange(2,il),inoderange(1,ir),inoderange(2,ir),nl,nr,xpivot,&
+                                                   xyzh_soa,iphase_soa,inodeparts,npnode,split_test)
+       else
+          call sort_particles_in_cell(iaxis,inoderange(1,nnode),inoderange(2,nnode),inoderange(1,il),inoderange(2,il),&
                                   inoderange(1,ir),inoderange(2,ir),nl,nr,xpivot,xyzh_soa,iphase_soa,inodeparts)
+       endif
        !if (il==8) print*,nnode,il,iaxis,nl,nr,xpivot,inodeparts(inoderange(1,il):inoderange(2,il))
 
        !if (any(xyzh_soa(inoderange(1,il):inoderange(2,il),iaxis) > xpivot)) print*,' ERROR x > xpivot on left'
@@ -883,6 +891,311 @@ subroutine sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_r,nl,nr,
  nr = max_r - min_r + 1
 
 end subroutine sort_particles_in_cell
+
+!----------------------------------------------------------------
+!+
+!  Categorise particles into daughter nodes by whether they
+!  fall to the left or the right of the pivot axis, but additionally
+!  force the cells to have a certain minimum number of particles per cell
+!+
+!----------------------------------------------------------------
+subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_r,&
+                                nl,nr,xpivot,xyzh_soa,iphase_soa,inodeparts,npnode,nchild_in)
+ use io, only:fatal
+ integer, intent(in)  :: iaxis,imin,imax,npnode,nchild_in
+ integer, intent(out) :: min_l,max_l,min_r,max_r,nl,nr
+ real, intent(inout)  :: xpivot,xyzh_soa(:,:)
+ integer(kind=1), intent(inout) :: iphase_soa(:)
+ integer,         intent(inout) :: inodeparts(:)
+ logical :: i_lt_pivot,j_lt_pivot,slide_l,slide_r
+ integer(kind=1) :: iphase_swap
+ integer :: inodeparts_swap,i,j
+ integer :: k,ii,rem_nr,rem_nl
+ real :: xyzh_swap(4),dpivot(npnode)
+
+ dpivot = 0.0
+
+ if (modulo(npnode,nchild_in) > 0) then
+   call fatal('special_sort','number of particles sent in not divisible by nchild')
+ endif
+
+ !print*,'nnode ',imin,imax,npnode,' pivot = ',iaxis,xpivot
+ i = imin
+ j = imax
+
+ i_lt_pivot = xyzh_soa(i,iaxis) <= xpivot
+ j_lt_pivot = xyzh_soa(j,iaxis) <= xpivot
+ dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
+ dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
+ !k = 0
+ do while(i < j)
+    if (i_lt_pivot) then
+       dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
+       i = i + 1
+       i_lt_pivot = xyzh_soa(i,iaxis) <= xpivot
+    else
+       if (.not.j_lt_pivot) then
+          dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
+          j = j - 1
+          j_lt_pivot = xyzh_soa(j,iaxis) <= xpivot
+       else
+          ! swap i and j positions in list
+          inodeparts_swap = inodeparts(i)
+          xyzh_swap(1:4)  = xyzh_soa(i,1:4)
+          iphase_swap     = iphase_soa(i)
+
+          inodeparts(i)   = inodeparts(j)
+          xyzh_soa(i,1:4) = xyzh_soa(j,1:4)
+          iphase_soa(i)   = iphase_soa(j)
+
+          inodeparts(j)   = inodeparts_swap
+          xyzh_soa(j,1:4) = xyzh_swap(1:4)
+          iphase_soa(j)   = iphase_swap
+
+          dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
+          dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
+
+          i = i + 1
+          j = j - 1
+          i_lt_pivot = xyzh_soa(i,iaxis) <= xpivot
+          j_lt_pivot = xyzh_soa(j,iaxis) <= xpivot
+       endif
+    endif
+ enddo
+
+ if (.not.i_lt_pivot) then
+   dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
+   i = i - 1
+ endif
+ if (j_lt_pivot) then
+   dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
+   j = j + 1
+ endif
+
+ min_l = imin
+ max_l = i
+ min_r = j
+ max_r = imax
+
+ if ( j /= i+1) print*,' ERROR ',i,j
+ nl = max_l - min_l + 1
+ nr = max_r - min_r + 1
+
+ ! does the pivot need to be adjusted?
+ rem_nl = modulo(nl,nchild_in)
+ rem_nr = modulo(nr,nchild_in)
+ if (rem_nl == 0 .and. rem_nr == 0) return
+
+ ! Decide which direction the pivot needs to go
+ if (rem_nl < rem_nr) then
+   slide_l = .true.
+   slide_r = .false.
+ else
+   slide_l = .false.
+   slide_r = .true.
+ endif
+ ! Override this if there's less than nchild*2 in the cell
+ if (nl < nchild_in) then
+   slide_r = .true.
+   slide_l = .false.
+ elseif (nr < nchild_in) then
+   slide_r = .false.
+   slide_l = .true.
+ endif
+
+ ! Move across particles by distance from xpivot till we get
+ ! the right number of particles in each cell
+ if (slide_r) then
+   do ii = 1,rem_nr
+     ! next particle to shift across
+     k = minloc(dpivot,dim=1,mask=dpivot.gt.0.) + imin - 1
+     if (k-imin+1==0) k = maxloc(dpivot,dim=1,mask=dpivot.lt.0.) + imin - 1
+
+     ! swap this with the first particle on the j side
+     inodeparts_swap = inodeparts(k)
+     xyzh_swap(1:4)  = xyzh_soa(k,1:4)
+     iphase_swap     = iphase_soa(k)
+
+     inodeparts(k)   = inodeparts(j)
+     xyzh_soa(k,1:4) = xyzh_soa(j,1:4)
+     iphase_soa(k)   = iphase_soa(j)
+
+     inodeparts(j)   = inodeparts_swap
+     xyzh_soa(j,1:4) = xyzh_swap(1:4)
+     iphase_soa(j)   = iphase_swap
+
+     ! and now shift to the right
+     i = i + 1
+     j = j + 1
+
+     ! ditch it, go again
+     dpivot(k-imin+1) = huge(k-imin+1)
+   enddo
+ else
+   do ii = 1,rem_nl
+     ! next particle to shift across
+     k = maxloc(dpivot,dim=1,mask=dpivot.lt.0.) + imin - 1
+     if (k-imin+1==0) k = minloc(dpivot,dim=1,mask=dpivot.gt.0.) + imin - 1
+
+     ! swap this with the last particle on the i side
+     inodeparts_swap = inodeparts(k)
+     xyzh_swap(1:4)  = xyzh_soa(k,1:4)
+     iphase_swap     = iphase_soa(k)
+
+     inodeparts(k)   = inodeparts(i)
+     xyzh_soa(k,1:4) = xyzh_soa(i,1:4)
+     iphase_soa(k)   = iphase_soa(i)
+
+     inodeparts(i)   = inodeparts_swap
+     xyzh_soa(i,1:4) = xyzh_swap(1:4)
+     iphase_soa(i)   = iphase_swap
+
+     ! and now shift to the left
+     i = i - 1
+     j = j - 1
+
+     ! ditch it, go again
+     dpivot(k-imin+1) = epsilon(real(k-imin+1))
+   enddo
+ endif
+
+ ! tidy up outputs
+ max_l = i
+ min_r = j
+ nl = max_l - min_l + 1
+ nr = max_r - min_r + 1
+
+end subroutine special_sort_particles_in_cell
+
+!----------------------------------------------------------------
+!+
+!  Takes in the current xpivot, checks to see if it needs
+!  to be shifted to give a particular number of particles on
+!  either side. Currently seeks multiples of 13 on each.
+!  NB: this can definitely be incorporated into the above routine
+!  in a cleverer + faster way
+!+
+!----------------------------------------------------------------
+subroutine slide_xpivot(xpivot,iaxis,npnode,i1,xyzh_soa,xmaxi,xmini,xyzcofm,imin,imax)
+  use io, only:fatal
+ real, intent(inout)     :: xpivot
+ integer, intent(inout)  :: iaxis
+ real, intent(in)        :: xyzh_soa(:,:),xmaxi(:),xmini(:),xyzcofm(:)
+ integer, intent(in)  :: npnode,i1,imin,imax
+ real :: dpivot(npnode),extra_dist,xpivot_new
+ logical :: slide_left, slide_right,finished,on_pivot
+ integer :: rhs,lhs,i,rem_rhs,rem_lhs,ii,kk,extra,iaxis_new,count
+
+ finished = .false.
+ xpivot_new = xpivot
+ iaxis_new = iaxis
+ count = 0
+ on_pivot = .false.
+
+ ! Check a number divisible by 13 is given
+ if (modulo((npnode),13)> 0) then
+   print*,npnode,'not divisible by (nchild+1 put into slide_xpivot)'
+   print*,'cannot expect this routine to work!'
+   !stop
+ endif
+
+sliding: do while (.not.finished)
+   ! work out how many particles are on either side of existing pivot
+   slide_left = .false.
+   slide_right = .false.
+   rhs = 0
+   lhs = 0
+   do i=i1,i1+npnode-1
+      dpivot(i-i1+1) = xpivot_new - xyzh_soa(i,iaxis_new)
+      if (dpivot(i-i1+1) > epsilon(dpivot)) rhs = rhs + 1
+      if (dpivot(i-i1+1) <= epsilon(dpivot)) lhs = lhs + 1
+   enddo
+
+   ! work out if we should move the pivot to get an even split
+   rem_rhs = modulo(rhs,13)
+   rem_lhs = modulo(lhs,13)
+   if (rem_rhs <= rem_lhs) slide_right = .true.
+   if (rem_lhs < rem_rhs) slide_left = .true.
+
+   ! override the above to force minimum in cell of 13
+   if (lhs < 13) then
+     slide_right = .true.
+     slide_left = .false.
+   elseif (rhs < 13) then
+     slide_left = .true.
+     slide_right = .false.
+   endif
+
+   ! if it's good, exit
+   if (.not.slide_left .and. .not.slide_right) then
+     iaxis = iaxis_new
+     xpivot = xpivot_new
+     return
+   endif
+
+   ! alternatively, slide the pivot such that the new cell will be
+   ! balanced as desired
+   if (slide_right) then
+     do ii = 1,rem_rhs
+       ! slide to the next particle across
+       kk = minloc(dpivot,dim=1,mask=dpivot.gt.0.)
+       ! ditch it, go again
+       dpivot(kk) = huge(kk)
+     enddo
+     ! add a bit to make sure pivot is not *on* a particle
+     extra =  minloc(dpivot,dim=1,mask=dpivot.gt.0.)
+     extra_dist = abs(0.5*(xyzh_soa(extra+i1-1,iaxis_new)-xyzh_soa(kk+i1-1,iaxis_new)))
+     xpivot_new = xyzh_soa(kk+i1-1,iaxis_new) - extra_dist
+   elseif (slide_left) then
+     do ii = 1,rem_lhs
+       ! slide to the next particle across
+       kk =  maxloc(dpivot,dim=1,mask=dpivot.lt.0.)
+       ! ditch it, go again
+       dpivot(kk) = epsilon(dpivot)
+     enddo
+     ! add a bit to make sure pivot is not *on* a particle
+     extra =  maxloc(dpivot,dim=1,mask=dpivot.lt.0.)
+     extra_dist = abs(0.5*(xyzh_soa(extra+i1-1,iaxis_new)-xyzh_soa(kk+i1-1,iaxis_new)))
+     xpivot_new = xyzh_soa(kk+i1-1,iaxis_new) + extra_dist
+   endif
+
+   rhs = 0
+   lhs = 0
+   do i=i1,i1+npnode-1
+      dpivot(i-i1+1) = xpivot_new - xyzh_soa(i,iaxis_new)
+      if (dpivot(i-i1+1) > epsilon(dpivot)) rhs = rhs + 1
+      if (dpivot(i-i1+1) <= epsilon(dpivot)) lhs = lhs + 1
+      if (abs(dpivot(i-i1+1)) < epsilon(dpivot)) on_pivot = .true.
+   enddo
+
+   if (on_pivot) then
+     ! Easiest way to avoid this is simply to move the pivot slightly,
+     ! but keep the numbers the same
+     if (slide_left) xpivot_new = xpivot_new + epsilon(xpivot_new)
+     if (slide_right) xpivot_new = xpivot_new - epsilon(xpivot_new)
+   endif
+
+
+   if (modulo(rhs,13) > 0 .or. modulo(lhs,13) > 0) then
+     ! this occurs if particles happen to lie on the plane of the pivot
+     ! pick the next biggest axis to cut across
+     iaxis_new = maxloc(xmaxi - xmini,1,(xmaxi - xmini) < (xmaxi(iaxis_new) - xmini(iaxis_new)))
+     if (iaxis_new ==0) then
+       print*,npnode,'sent into slide pivot, cannot find appropriate axis to split across'
+       stop
+     endif
+     xpivot_new = xyzcofm(iaxis_new)
+     count = count + 1
+     on_pivot = .false.
+   else
+     finished = .true.
+   endif
+ enddo sliding
+
+ iaxis = iaxis_new
+ xpivot = xpivot_new
+
+end subroutine slide_xpivot
 
 !----------------------------------------------------------------
 !+

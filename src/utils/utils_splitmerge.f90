@@ -59,7 +59,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,i
     dhfac = 1./(nchild)**(1./3.)
  endif
  hchild = xyzh(4,iparent)*dhfac
- sep    = 0.35*xyzh(4,iparent)
+ sep    = 0.41*xyzh(4,iparent)
  ichild = 0
  beta   = acos(2.0*ran2(iseed)-1.0)
  gamma  = 2.0*pi*ran2(anotherseed)

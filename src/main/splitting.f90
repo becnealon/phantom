@@ -23,14 +23,15 @@ module split
  implicit none
 
  public :: init_split,write_options_splitting,read_options_splitting
- public :: check_split_or_merge,check_ghost_or_splitghost,compare_reals_and_ghosts
+ public :: check_split_or_merge,check_ghost_or_splitghost
  public :: update_splitting,merge_particles_wrapper
 
  private
 
  integer, parameter, public  :: nchild = 12
- integer, save    :: children_list(nchild+1) = 0
- real, public     :: splitrad,splitbox(4),gzw
+ integer, parameter :: nchild_in = nchild + 1
+ integer, save      :: children_list(nchild_in) = 0
+ real, public       :: splitrad,splitbox(4),gzw
 
 contains
 
@@ -58,7 +59,7 @@ ierr = 0
 
 ! set masses
 if (centre_particle) then
-   massoftype(isplit) = massoftype(igas)/(nchild+1)
+   massoftype(isplit) = massoftype(igas)/nchild_in
 else
    massoftype(isplit) = massoftype(igas)/(nchild)
 endif
@@ -97,7 +98,7 @@ if (rand_type==3) then
    call merge_particles_wrapper(npart,xyzh,npartoftype,.true.)
 endif
 if (rand_type==4) then
-   call merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu,13,npart,.true.)
+   call merge_all_particles(npart,npartoftype,massoftype,xyzh,vxyzu,nchild_in,npart,.true.)
 endif
 
  endif ! end if rand_type==5
@@ -116,12 +117,27 @@ end subroutine init_split
 subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
  use io,   only: fatal
  use part, only:kill_particle,isdead_or_accreted,shuffle_part,iactive
+ use timestep, only:time
  integer, intent(inout) :: npart,npartoftype(:)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  integer                :: i,k,add_npart
- logical                :: split_it,ghost_it,already_split,already_ghost,make_ghost
+ logical                :: split_it,ghost_it,already_split
+ logical                :: make_ghost,send_to_list
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
+
+
+  ! Reset the boundaries depending on time
+  gzw = 0.
+  if (time < 0.2 .or. time > 0.4) then
+  splitbox(:) = 0.
+  else
+  splitbox(1) = 0.5
+  splitbox(2) = 0.5
+  splitbox(3) = -0.5
+  splitbox(4) = -0.5
+  endif
+
 
  if (rand_type /= 5) then
     call fatal('update_splitting','this routine is set up only for rand_type==5')
@@ -129,68 +145,75 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
  endif
  !
  !--Kill all active ghost particle  &
- !  Convert gas <-> splits that have crossed the boundary
+ !  Convert gas -> splits that have crossed the boundary
  !
- allocate(xyzh_split(4,npartoftype(isplit)))
- allocate(ioriginal(npartoftype(isplit)))
- k = 0
  add_npart = 0
- make_ghost = .false.
- split_loop: do i = 1,npart
+ split_em: do i = 1,npart
     if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
        if (iamghost(iphase(i))) then
           call kill_particle(i,npartoftype)
-          cycle split_loop
+          cycle split_em
        endif
        call inside_boundary(xyzh(1:3,i),split_it)
        already_split = iamsplit(iphase(i))
+
+       ! is it a big particle that needs to be split?
        if (split_it .and. .not.already_split) then
           call split_a_particle(nchild,i,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)  ! nchild = 12
           add_npart = add_npart + nchild
-       elseif (.not.split_it .and. already_split) then ! this should be only the split particles that need to be converted into gas particles
-          k = k + 1
-          xyzh_split(:,k) = xyzh(:,i)
-          ioriginal(k) = i
        endif
-    endif
- enddo split_loop
+   endif
+ enddo split_em
  npart = npart + add_npart
- print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
- if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
  call shuffle_part(npart)
- deallocate(xyzh_split)
- deallocate(ioriginal)
- !
- !--Go through list and create ghost particles as required
- !
- allocate(xyzh_split(4,npartoftype(isplit)))
- allocate(ioriginal(npartoftype(isplit)))
+
+ ! Now go through and collect anything that should go into set_linklist call
+ allocate(xyzh_split(4,npart*4))
+ allocate(ioriginal(npart*4))
  k = 0
  add_npart = 0
- make_ghost = .true.
- ghost_loop: do i = 1,npart
-    if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
-       call inside_ghost_zone(xyzh(1:3,i),ghost_it)
-       already_ghost = iamghost(iphase(i))
-       if (ghost_it .and. .not.already_ghost) then
-          already_split = iamsplit(iphase(i))
-          ! this is inside the boundary and should be merged
-          if (already_split) then
-             ! make list of particles to make ghost particles
-             k = k + 1
-             xyzh_split(:,k) = xyzh(:,i)
-             ioriginal(k) = i
-          else
-             ! make splitghosts
-             call make_split_ghost(npart+add_npart+1,i,npartoftype,npart,nchild,xyzh,vxyzu)
-             add_npart = add_npart + nchild + 1
-          endif
-       endif
-    endif
- enddo ghost_loop
+ make_ghost = .false.
+ merge_em: do i = 1,npart
+   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+      send_to_list = .false.
+     ! Does the particle need a ghost?
+     call inside_ghost_zone(xyzh(1:3,i),ghost_it)
+     call inside_boundary(xyzh(1:3,i),split_it)
+     already_split = iamsplit(iphase(i))
+
+     ! if it is a merged particle that needs splitghosts, just make these
+     if (ghost_it .and. .not.split_it .and. .not.already_split) then
+       call make_split_ghost(npart+add_npart+1,i,npartoftype,npart,nchild,xyzh,vxyzu)
+       add_npart = add_npart + nchild + 1
+     endif
+
+     ! if it is a split particle that needs a merged ghost, send to list
+    !if (ghost_it .and. split_it .and. already_split) then
+    !   send_to_list = .true.
+    ! endif
+
+    ! if it a split that has crossed into the non-split region, send to list
+    !if (.not.split_it .and. already_split) then
+    !   send_to_list = .true.
+    ! endif
+    ! for now, just send all splits
+    if (already_split) send_to_list = .true.
+
+     ! if particle needs to go to set_linklist call, add it to the list
+     if (send_to_list) then
+       k = k + 1
+       xyzh_split(:,k) = xyzh(:,i)
+       ioriginal(k) = i
+     endif
+   endif
+ enddo merge_em
+
  npart = npart + add_npart
+
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
- if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
+ if (k > nchild_in) call merge_particles(npart,k,xyzh,xyzh_split(:,1:k),ioriginal,npartoftype,make_ghost)
+ call shuffle_part(npart)
+
  deallocate(xyzh_split)
  deallocate(ioriginal)
 
@@ -224,10 +247,10 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_c
   ! if it should not be split, but already is, merge it
   else if (.not.split_it .and. already_split .and. rand_type < 3) then
     if (rand_type==2) then
-        ilucky = int(ran2(seed)*(nchild+1))+1
+        ilucky = int(ran2(seed)*nchild_in)+1
         if (ilucky==1) then
            ! particle becomes merged
-           xyzh(4,ii) = xyzh(4,ii) * (nchild+1)**(1./3.)
+           xyzh(4,ii) = xyzh(4,ii) * nchild_in**(1./3.)
            call set_particle_type(ii,igas)
            npartoftype(igas) = npartoftype(igas) + 1
            npartoftype(isplit) = npartoftype(isplit) - 1
@@ -238,8 +261,8 @@ subroutine check_split_or_merge(ii,iphaseii,xyzh,vxyzu,npart,npartoftype,merge_c
     else
        merge_count = merge_count + 1
        children_list(merge_count) = ii
-       if (merge_count == nchild+1) then
-         call fast_merge_into_a_particle(nchild+1,children_list,npart,xyzh,vxyzu,npartoftype,ii)
+       if (merge_count == nchild_in) then
+         call fast_merge_into_a_particle(nchild_in,children_list,npart,xyzh,vxyzu,npartoftype,ii)
          merge_count = 0
        endif
      endif
@@ -273,17 +296,17 @@ subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,&
     ! this is inside the boundary and should be merged (just use the original parent)
     if (already_split .and. rand_type < 3) then
       if (rand_type==2) then
-        ilucky = int(ran2(seed)*(nchild+1))+1
+        ilucky = int(ran2(seed)*nchild_in)+1
         if (ilucky==1) then
-           call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild+1,xyzh)
+           call make_a_ghost(npart+add_npart+1,ii,npartoftype,npart,nchild_in,xyzh)
            add_npart = add_npart + 1
         endif
       else
          merge_ghost_count = merge_ghost_count + 1
          children_list(merge_ghost_count) = ii
-         if (merge_ghost_count == nchild+1) then
+         if (merge_ghost_count == nchild_in) then
             if (rand_type==1) then
-               ilucky = int(ran2(seed)*(nchild+1))+1
+               ilucky = int(ran2(seed)*nchild_in)+1
                ilucky = children_list(ilucky)
                !print*, ilucky,children_list(ilucky)
             elseif (rand_type==0) then
@@ -292,7 +315,7 @@ subroutine check_ghost_or_splitghost(ii,iphaseii,xyzh,vxyzu,npart,&
                print*, 'This should not be possible'
                stop
             endif
-            call make_a_ghost(npart+add_npart+1,ilucky,npartoftype,npart,nchild+1,xyzh)
+            call make_a_ghost(npart+add_npart+1,ilucky,npartoftype,npart,nchild_in,xyzh)
             merge_ghost_count = 0
             add_npart = add_npart + 1
          endif
@@ -345,7 +368,7 @@ subroutine merge_particles_wrapper(npart,xyzh,npartoftype,make_ghost)
  enddo
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
 
- if (k > 0) call merge_particles(npart,k,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
+ if (k > nchild_in) call merge_particles(npart,k,xyzh,xyzh_split(:,1:k),ioriginal,npartoftype,make_ghost)
 
  deallocate(xyzh_split)
  deallocate(ioriginal)
@@ -359,22 +382,29 @@ end subroutine merge_particles_wrapper
 !  if make_ghosts = false, then merge split particles into gas particles
 !+
 !----------------------------------------------------------------
-subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
+subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
  use linklist,       only:ncells,get_neighbour_list,get_hmaxcell,get_cell_location,set_linklist,ifirstincell
  use kdtree,         only:inodeparts,inoderange
- use part,           only:iactive,isdead_or_accreted,set_particle_type,kill_particle
+ use part,           only:iactive,isdead_or_accreted,set_particle_type,kill_particle,copy_particle_all
  use mpiforce,       only:cellforce
+ use io,             only:fatal
  integer, intent(inout) :: npartoftype(:),npart
  real,    intent(inout) :: xyzh(:,:),xyzh_split(:,:)
  logical, intent(in)    :: make_ghost
  integer, intent(in)    :: ioriginal(:)
- integer, intent(inout) :: ncandiate  ! needs to be inout to satisfy if MPI, but we can't have pre-processor statements in this .f90 file
- integer                :: i,j,k,icell,jmin,n_cell,iave(4)
+ integer, intent(inout) :: ncandidate  ! needs to be inout to satisfy if MPI, but we can't have pre-processor statements in this .f90 file
+ integer                :: i,j,k,icell,jmin,n_cell,iave(4),remainder
  real                   :: r2,r2min,hmax,hcell
  type(cellforce)        :: cell
+ logical                :: ghost_it,split_it
 
- ! Use the tree to make  the link list
- call set_linklist(ncandiate,ncandiate,xyzh_split(:,1:ncandiate),xyzh(:,1:ncandiate)) ! the final term is never used in linklist
+ ! Make sure only a multiple of nchild_in is ever used here (for even division of particles amongst cells)
+ ! (just forget the rest, always a small number and normally gets picked up in the next time-step)
+ remainder = modulo(ncandidate,nchild_in)
+ ncandidate = ncandidate - remainder
+
+ ! Use the tree to make  the link list, the second last term is not use
+ call set_linklist(ncandidate,ncandidate,xyzh_split(:,1:ncandidate),xyzh(:,1:ncandidate),special_split=nchild_in)
 
  ! Go through all the cells, and create a ghost .or. merge them
  ! in both cases, the new particle will be based upon the centre-most particle in the cell
@@ -406,24 +436,62 @@ subroutine merge_particles(npart,ncandiate,xyzh,xyzh_split,ioriginal,npartoftype
           jmin  = j
        endif
     enddo
-    ! make a gas ghost from the splits OR merge splits into gas
-    if (make_ghost) then
-       k = ioriginal(inodeparts(jmin))
-       npart = npart + 1
-       call make_a_ghost(npart,k,npartoftype,npart,13,xyzh)
-    else
-       do j = inoderange(1,icell),inoderange(2,icell)
+
+    ! for each cell generated, if the
+    ! centroid is inside ghost region -> make ghost from central particle
+    ! centroid is outside split region -> merge splits to make a real
+    ! centroid is outside split *and* inside ghost, do both
+    k = ioriginal(inodeparts(jmin))
+  !  hack to take into account periodic boundaries
+    if ((xyzh(1,k) > 0.5)) xyzh(1,k) = xyzh(1,k) - 1.0
+    if ((xyzh(1,k) < -0.5)) xyzh(1,k) = xyzh(1,k) + 1.0
+    if ((xyzh(2,k) > 0.5)) xyzh(2,k) = xyzh(2,k) - 1.0
+    if ((xyzh(2,k) < -0.5)) xyzh(2,k) = xyzh(2,k) + 1.0
+
+    call inside_ghost_zone(xyzh(1:3,k),ghost_it)
+    call inside_boundary(xyzh(1:3,k),split_it)
+
+    if (.not.ghost_it .and. .not.split_it) then
+      ! this particle should be straight up merged, get rid of the rest
+      do j = inoderange(1,icell),inoderange(2,icell)
+         k = ioriginal(inodeparts(j))
+         if (j==jmin) then
+            xyzh(4,k) = xyzh(4,k) * nchild_in**(1./3.)
+            call set_particle_type(k,igas)
+            npartoftype(igas)   = npartoftype(igas)   + 1
+            npartoftype(isplit) = npartoftype(isplit) - 1
+         else
+            call kill_particle(k,npartoftype(:))
+         endif
+      enddo
+    endif
+
+    if (ghost_it) then
+      if (.not.split_it) then
+        ! need to make a merged particle and turn the rest into ghosts
+        do j = inoderange(1,icell),inoderange(2,icell)
           k = ioriginal(inodeparts(j))
           if (j==jmin) then
-             xyzh(4,k) = xyzh(4,k) * 13.**(1./3.)
-             call set_particle_type(k,igas)
-             npartoftype(igas)   = npartoftype(igas)   + 1
-             npartoftype(isplit) = npartoftype(isplit) - 1
-          else
-             call kill_particle(k,npartoftype(:))
+              ! copy particle to make the merged
+              npart = npart + 1
+              call copy_particle_all(k,npart,.true.)
+              xyzh(4,npart) = xyzh(4,k) * nchild_in**(1./3.)
+              call set_particle_type(npart,igas)
+              npartoftype(igas) = npartoftype(igas) + 1
           endif
-       enddo
+            ! turn all particles into splitghosts
+            call set_particle_type(k,isplitghost)
+            npartoftype(isplitghost) = npartoftype(isplitghost) + 1
+            npartoftype(isplit) = npartoftype(isplit) - 1
+        enddo
+      elseif (split_it) then
+        ! just need a merged ghost here
+        k = ioriginal(inodeparts(jmin))
+        npart = npart + 1
+        call make_a_ghost(npart,k,npartoftype,npart,nchild_in,xyzh)
+      endif
     endif
+
  enddo over_cells
  print*, 'min, average, and maximum particles per cell: ',iave(3),float(iave(2))/float(iave(1)),iave(4)
 
@@ -476,7 +544,6 @@ subroutine inside_ghost_zone(pos,should_ghost)
         pos(2) > (splitbox(4)+gzw) .and. pos(2) < (splitbox(2)-gzw)) in_small_box=.true.
     if (in_big_box .and. .not.in_small_box) should_ghost = .true.
   endif
-
 
 end subroutine inside_ghost_zone
 
@@ -557,7 +624,7 @@ subroutine read_options_splitting(name,valstring,imatch,igotall,ierr,isplitbound
  case('boundary width')
     read(valstring,*,iostat=ierr) gzw
     ngot = ngot + 1
-    if (gzw < tiny(gzw)) call fatal(label,'gzw must be > 0. in input options')
+    !if (gzw < tiny(gzw)) call fatal(label,'gzw must be > 0. in input options')
  case default
     imatch = .false.
     select case(isplitboundary)
@@ -648,61 +715,5 @@ subroutine read_options_splitbox(name,valstring,imatch,igotsplitbox,ierr)
  igotsplitbox = (ngot >= 1)
 
 end subroutine read_options_splitbox
-
-!-----------------------------------------------------------------------
-!+
-!  Testing routine to calculate the mean density for the particles in the
-!  ghost region, prints out the percentage difference between ghosts and
-!  reals in comparable region
-!+
-!-----------------------------------------------------------------------
-
-subroutine compare_reals_and_ghosts(xyzh,npart)
-  use part, only:massoftype,rhoh,iamtype,igas,isplit,ighost,isplitghost
-  real, intent(in) :: xyzh(:,:)
-  integer, intent(in) :: npart
-  real :: m_gas,m_splits,m_ghosts,m_splitghosts
-  integer :: ii,itype,gas, splits,ghosts,splitghosts
-  logical :: ghost_it
-
-  m_gas = 0.
-  gas = 0
-  m_splits = 0.
-  splits = 0
-  m_ghosts = 0.
-  ghosts = 0
-  m_splitghosts = 0.
-  splitghosts = 0
-
-  do ii = 1,npart
-    call inside_ghost_zone(xyzh(1:3,ii),ghost_it)
-    if (ghost_it) then
-      itype = iamtype(iphase(ii))
-      if (itype==igas) then
-          m_gas = m_gas + rhoh(xyzh(4,ii),massoftype(igas))
-          gas = gas + 1
-      elseif (itype==isplit) then
-          m_splits = m_splits + rhoh(xyzh(4,ii),massoftype(isplit))
-          splits = splits + 1
-      elseif (itype==ighost) then
-          m_ghosts = m_ghosts + rhoh(xyzh(4,ii),massoftype(ighost))
-          ghosts = ghosts + 1
-      elseif (itype==isplitghost) then
-          m_splitghosts = m_splitghosts + rhoh(xyzh(4,ii),massoftype(isplitghost))
-          splitghosts = splitghosts + 1
-      endif
-    endif
-  enddo
-
-  m_gas = m_gas/gas
-  m_splits = m_splits/splits
-  m_ghosts = m_ghosts/ghosts
-  m_splitghosts = m_splitghosts/splitghosts
-
-  print*,'-----------------------------------------------'
-  print*,'Outside boundary',(m_gas/m_splitghosts)*100.
-  print*,'Inside boundary',(m_splits/m_ghosts)*100.
-  print*,'-----------------------------------------------'
-end subroutine compare_reals_and_ghosts
 
 end module split

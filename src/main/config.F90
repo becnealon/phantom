@@ -116,7 +116,7 @@ module dim
 
  ! kdtree
 #ifdef SPLITTING
- integer, parameter :: minpart = 20 ! to merge or make ghosts, require an average of 13 particle per box
+ integer, parameter :: minpart = 13 ! to merge or make ghosts, require 13 particles per box
 #else
  integer, parameter :: minpart = 10
 #endif

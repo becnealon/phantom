@@ -102,6 +102,10 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #ifdef BINPOS
  use mf_write,         only:binpos_write
 #endif
+#ifdef SPLITTING
+  use split,           only:update_splitting
+  use part,            only:npartoftype
+#endif
 
  character(len=*), intent(in)    :: infile
  character(len=*), intent(inout) :: logfile,evfile,dumpfile
@@ -223,6 +227,10 @@ subroutine evol(infile,logfile,evfile,dumpfile)
     npart_old=npart
     call inject_particles(time,dtlast,xyzh,vxyzu,xyzmh_ptmass,vxyz_ptmass,npart,npartoftype,dtinject)
     call update_injected_particles(npart_old,npart,istepfrac,nbinmax,time,dtmax,dt,dtinject)
+#endif
+
+#ifdef SPLITTING
+  call update_splitting(npart,xyzh,vxyzu,npartoftype)
 #endif
 
     dtmaxold    = dtmax

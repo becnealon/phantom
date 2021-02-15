@@ -771,7 +771,7 @@ subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, 
        !                         inoderange(1,ir),inoderange(2,ir),nl,nr,xpivot,xyzh_soa,iphase_soa,inodeparts)
        !print*,ir,inodeparts(inoderange(1,il):inoderange(2,il))
        if (split_test>0) then
-          call special_sort_particles_in_cell(iaxis,inoderange(1,nnode),inoderange(2,nnode),inoderange(1,il),&
+        call special_sort_particles_in_cell(iaxis,inoderange(1,nnode),inoderange(2,nnode),inoderange(1,il),&
                                                    inoderange(2,il),inoderange(1,ir),inoderange(2,ir),nl,nr,xpivot,&
                                                    xyzh_soa,iphase_soa,inodeparts,npnode,split_test)
        else
@@ -919,7 +919,7 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
    call fatal('special_sort','number of particles sent in not divisible by nchild')
  endif
 
- !print*,'nnode ',imin,imax,npnode,' pivot = ',iaxis,xpivot
+! print*,'nnode ',imin,imax,npnode,' pivot = ',iaxis,xpivot
  i = imin
  j = imax
 
@@ -930,13 +930,13 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
  !k = 0
  do while(i < j)
     if (i_lt_pivot) then
-       dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
        i = i + 1
+       dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
        i_lt_pivot = xyzh_soa(i,iaxis) <= xpivot
     else
        if (.not.j_lt_pivot) then
-          dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
           j = j - 1
+          dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
           j_lt_pivot = xyzh_soa(j,iaxis) <= xpivot
        else
           ! swap i and j positions in list
@@ -952,11 +952,12 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
           xyzh_soa(j,1:4) = xyzh_swap(1:4)
           iphase_soa(j)   = iphase_swap
 
+          i = i + 1
+          j = j - 1
+
           dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
           dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
 
-          i = i + 1
-          j = j - 1
           i_lt_pivot = xyzh_soa(i,iaxis) <= xpivot
           j_lt_pivot = xyzh_soa(j,iaxis) <= xpivot
        endif
@@ -964,12 +965,12 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
  enddo
 
  if (.not.i_lt_pivot) then
-   dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
    i = i - 1
+   dpivot(i-imin+1) = xpivot - xyzh_soa(i,iaxis)
  endif
  if (j_lt_pivot) then
-   dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
    j = j + 1
+   dpivot(j-imin+1) = xpivot - xyzh_soa(j,iaxis)
  endif
 
  min_l = imin
@@ -1055,7 +1056,8 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
      j = j - 1
 
      ! ditch it, go again
-     dpivot(k-imin+1) = epsilon(real(k-imin+1))
+     dpivot(k-imin+1) = huge(k-imin+1)
+
    enddo
  endif
 
@@ -1084,7 +1086,7 @@ subroutine slide_xpivot(xpivot,iaxis,npnode,i1,xyzh_soa,xmaxi,xmini,xyzcofm,imin
  integer, intent(in)  :: npnode,i1,imin,imax
  real :: dpivot(npnode),extra_dist,xpivot_new
  logical :: slide_left, slide_right,finished,on_pivot
- integer :: rhs,lhs,i,rem_rhs,rem_lhs,ii,kk,extra,iaxis_new,count
+ integer :: rhs,lhs,i,rem_rhs,rem_lhs,ii,kk,extra,iaxis_new,count,mm
 
  finished = .false.
  xpivot_new = xpivot
@@ -1175,21 +1177,20 @@ sliding: do while (.not.finished)
      if (slide_right) xpivot_new = xpivot_new - epsilon(xpivot_new)
    endif
 
-
-   if (modulo(rhs,13) > 0 .or. modulo(lhs,13) > 0) then
+    if (modulo(rhs,13) > 0 .or. modulo(lhs,13) > 0) then
      ! this occurs if particles happen to lie on the plane of the pivot
      ! pick the next biggest axis to cut across
-     iaxis_new = maxloc(xmaxi - xmini,1,(xmaxi - xmini) < (xmaxi(iaxis_new) - xmini(iaxis_new)))
+      iaxis_new = maxloc(xmaxi - xmini,1,(xmaxi - xmini) < (xmaxi(iaxis_new) - xmini(iaxis_new)))
      if (iaxis_new ==0) then
        print*,npnode,'sent into slide pivot, cannot find appropriate axis to split across'
-       stop
-     endif
-     xpivot_new = xyzcofm(iaxis_new)
-     count = count + 1
-     on_pivot = .false.
-   else
-     finished = .true.
-   endif
+        stop
+      endif
+      xpivot_new = xyzcofm(iaxis_new)
+      count = count + 1
+      on_pivot = .false.
+    else
+      finished = .true.
+    endif
  enddo sliding
 
  iaxis = iaxis_new

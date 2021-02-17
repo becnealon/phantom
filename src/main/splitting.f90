@@ -48,6 +48,7 @@ subroutine init_split(ierr)
  integer, intent(inout) :: ierr
  integer :: ii,merge_count,merge_ghost_count,add_npart
  integer(kind=1) :: iphaseii
+ logical :: need_to_relax
 
 ierr = 0
 
@@ -72,7 +73,7 @@ call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
 ! 2. should it be split or merged?
 
  if (rand_type==5) then
-    call update_splitting(npart,xyzh,vxyzu,npartoftype)
+    call update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  else
 
 merge_count = 0
@@ -114,13 +115,14 @@ end subroutine init_split
 !  and making of ghosts
 !+
 !----------------------------------------------------------------
-subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
+subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  use io,   only: fatal
  use part, only:kill_particle,isdead_or_accreted,shuffle_part,iactive
  use timestep, only:time
  integer, intent(inout) :: npart,npartoftype(:)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
- integer                :: i,k,add_npart
+ logical, intent(inout) :: need_to_relax
+ integer                :: i,k,add_npart,oldsplits,oldreals
  logical                :: split_it,ghost_it,already_split
  logical                :: make_ghost,send_to_list
  integer, allocatable, dimension(:)   :: ioriginal(:)
@@ -128,6 +130,9 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
 
 
   ! Reset the boundaries depending on time
+  need_to_relax = .false.
+  oldsplits = npartoftype(isplit)
+  oldreals = npartoftype(igas)
   gzw = 0.
   if (time < 0.2 .or. time > 0.4) then
   splitbox(:) = 0.
@@ -216,6 +221,9 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype)
 
  deallocate(xyzh_split)
  deallocate(ioriginal)
+
+ ! Do we need to shuffle the particles later? If you never want to, comment out below
+ if (npartoftype(igas) /= oldreals .or. npartoftype(isplit) /= oldsplits) need_to_relax = .true.
 
 end subroutine update_splitting
 

@@ -131,6 +131,9 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #ifdef INJECT_PARTICLES
  integer         :: npart_old
 #endif
+#ifdef SPLITTING
+  logical        :: need_to_relax
+#endif
  logical         :: fulldump,abortrun,at_dump_time
  logical         :: should_conserve_energy,should_conserve_momentum,should_conserve_angmom
  logical         :: should_conserve_dustmass
@@ -230,7 +233,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
-  call update_splitting(npart,xyzh,vxyzu,npartoftype)
+  call update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
 #endif
 
     dtmaxold    = dtmax
@@ -260,6 +263,10 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 
     !--print summary of timestep bins
     if (iverbose >= 2) call write_binsummary(npart,nbinmax,dtmax,timeperbin,iphase,ibin,xyzh)
+#endif
+
+#ifdef SPLITTING
+  if (need_to_relax) call relax_by_WVT(xyzh,vxyzu,npart)
 #endif
 
     if (gravity .and. icreate_sinks > 0 .and. ipart_rhomax /= 0) then
@@ -630,5 +637,41 @@ subroutine print_timinginfo(iprint,nsteps,nsteplast,&
  endif
 
 end subroutine print_timinginfo
+
+!----------------------------------------------------------------
+!+
+!  routine shuffle and relax particles for particle splitting
+!  (this will need to be re-written into other routines)
+!+
+!----------------------------------------------------------------
+subroutine relax_by_WVT(xyzh,vxyzu,npart)
+  use part, only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind
+  use part, only: gradh,rad,radprop,dvdx
+  use densityforce, only:densityiterate
+  use splitmergeutils, only:shift_particles_WVT
+  use timestep_ind,    only:nactive
+  real, intent(inout) :: xyzh(:,:),vxyzu(:,:)
+  integer, intent(in) :: npart
+  real :: stressmax,mu,dmu
+  integer :: nshifts,i
+
+  nshifts = 100.
+  mu = 0.001
+  dmu = real(mu/nshifts)
+
+  do i = 1,nshifts
+    ! calculate the new smoothing length
+    call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
+                            fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+
+    ! calculate the shifts according to the WVT method
+    call shift_particles_WVT(npart,xyzh,mu)
+
+    ! decrease mu for next go around
+    mu = mu - dmu
+    print*,'ran through shifts, mu =',mu
+  enddo
+
+end subroutine relax_by_WVT
 
 end module evolve

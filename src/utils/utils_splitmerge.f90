@@ -166,6 +166,58 @@ end subroutine shift_particles
 
 !-----------------------------------------------------------------------
 !+
+! calculates particle shifts according to WVT method from
+! Diehls et al 2015
+!+
+!-----------------------------------------------------------------------
+subroutine shift_particles_WVT(npart,xyzh,mu)
+ use kernel, only:radkern2
+ use part,   only:isdead_or_accreted,iactive,iphase
+ real, intent(inout)    :: xyzh(:,:)
+ real, intent(in)    :: mu
+ integer, intent(in) :: npart
+ integer             :: i,j
+ real                :: rij2,f,hij,f_const
+ real                :: q2,rij(3)
+ real                :: shifts(3,npart),maxshift
+
+
+ shifts = 0.
+ f_const = 0.25
+ do i = 1,npart !for each active particle
+   ! CHECK ITS ACTIVE
+   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+
+     over_npart: do j = 1,npart
+        if (i == j) cycle over_npart
+        rij = xyzh(1:3,j) - xyzh(1:3,i)
+        rij2 = dot_product(rij,rij)
+        q2 = rij2/(xyzh(4,i)*xyzh(4,i))
+
+        if (q2 < radkern2) then
+          hij = 0.5*(xyzh(4,i) + xyzh(4,j))
+          f = (hij/(sqrt(rij2) + epsilon(rij2)))**2 - f_const
+          !if (i==1) print*,sqrt(rij2),2.*xyzh(4,i),f,rij/sqrt(rij2)
+          shifts(:,i) = shifts(:,i) + xyzh(4,i)*f*rij/sqrt(rij2)
+        endif
+      enddo over_npart
+    endif
+ enddo
+
+ ! Final form
+ shifts = shifts*mu
+
+ ! Check, do any of the shifts correspond to more than the box size?
+ maxshift = maxval(abs(shifts))
+ if (maxshift > 0.5) print*,'WARNING SHIFTS ARE LARGE',maxshift
+
+ ! Now apply the shifts
+ xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
+
+end subroutine shift_particles_WVT
+
+!-----------------------------------------------------------------------
+!+
 ! merges nchild particles in one parent particle
 ! parent properties averaged from children
 !+

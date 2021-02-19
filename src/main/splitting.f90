@@ -117,7 +117,7 @@ end subroutine init_split
 !----------------------------------------------------------------
 subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  use io,   only: fatal
- use part, only:kill_particle,isdead_or_accreted,shuffle_part,iactive
+ use part, only:kill_particle,isdead_or_accreted,shuffle_part,iactive,periodic
  use timestep, only:time
  integer, intent(inout) :: npart,npartoftype(:)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
@@ -224,6 +224,8 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
 
  ! Do we need to shuffle the particles later? If you never want to, comment out below
  if (npartoftype(igas) /= oldreals .or. npartoftype(isplit) /= oldsplits) need_to_relax = .true.
+
+ if (periodic) call shift_for_periodicity(npart,xyzh)
 
 end subroutine update_splitting
 

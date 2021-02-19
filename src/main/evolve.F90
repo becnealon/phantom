@@ -266,7 +266,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
-  if (need_to_relax) call relax_by_WVT(xyzh,vxyzu,npart)
+  if (need_to_relax) call relax_by_WVT(xyzh,xyzh(4,:),vxyzu,npart)
 #endif
 
     if (gravity .and. icreate_sinks > 0 .and. ipart_rhomax /= 0) then
@@ -644,32 +644,34 @@ end subroutine print_timinginfo
 !  (this will need to be re-written into other routines)
 !+
 !----------------------------------------------------------------
-subroutine relax_by_WVT(xyzh,vxyzu,npart)
+subroutine relax_by_WVT(xyzh,h0,vxyzu,npart)
+  use dim,  only: maxp_hard
   use part, only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind
   use part, only: gradh,rad,radprop,dvdx
   use densityforce, only:densityiterate
   use splitmergeutils, only:shift_particles_WVT
   use timestep_ind,    only:nactive
-  real, intent(inout) :: xyzh(:,:),vxyzu(:,:)
+  real, intent(inout) :: xyzh(:,:),vxyzu(:,:),h0(:)
   integer, intent(in) :: npart
   real :: stressmax,mu,dmu
   integer :: nshifts,i
 
   nshifts = 100.
   mu = 0.001
-  dmu = real(mu/nshifts)
+
+  dmu = real(mu/(nshifts+1))
 
   do i = 1,nshifts
     ! calculate the new smoothing length
-    call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
-                            fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+!    call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
+!                            fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
 
     ! calculate the shifts according to the WVT method
-    call shift_particles_WVT(npart,xyzh,mu)
+    call shift_particles_WVT(npart,xyzh,h0,mu)
 
     ! decrease mu for next go around
     mu = mu - dmu
-    print*,'ran through shifts, mu =',mu
+    print*,'ran through shifts. mu = ',mu,' for iteration i = ',i
   enddo
 
 end subroutine relax_by_WVT

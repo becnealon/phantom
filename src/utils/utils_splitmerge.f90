@@ -170,49 +170,99 @@ end subroutine shift_particles
 ! Diehls et al 2015
 !+
 !-----------------------------------------------------------------------
-subroutine shift_particles_WVT(npart,xyzh,mu)
+subroutine shift_particles_WVT(npart,xyzh,h0,mu)
  use kernel, only:radkern2
- use part,   only:isdead_or_accreted,iactive,iphase
- real, intent(inout)    :: xyzh(:,:)
+ use part,   only:isdead_or_accreted,iactive,iphase,periodic,rhoh,massoftype,isplit
+ use boundary, only: dxbound,dybound,dzbound,xmin,xmax,ymin,zmin,zmax,ymax
+ real, intent(inout)    :: xyzh(:,:),h0(:)
  real, intent(in)    :: mu
  integer, intent(in) :: npart
  integer             :: i,j
- real                :: rij2,f,hij,f_const
+ real                :: rij2,f,hij,hi12,f_const,xi,yi,zi,hi,hj
  real                :: q2,rij(3)
  real                :: shifts(3,npart),maxshift
+ logical             :: really_far
+ logical             :: Diehl = .false.
+ logical             :: local_debug = .true.
 
 
  shifts = 0.
- f_const = 0.25
+ f_const = 0.25 ! to ensure that f = 0 at 2h
  do i = 1,npart !for each active particle
    ! CHECK ITS ACTIVE
    if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
-
+     xi = xyzh(1,i)
+     yi = xyzh(2,i)
+     zi = xyzh(3,i)
+     !hi = xyzh(4,i)
+     hi = h0(i)
+     hi12 = 1.0/(hi*hi)
      over_npart: do j = 1,npart
         if (i == j) cycle over_npart
-        rij = xyzh(1:3,j) - xyzh(1:3,i)
+        rij(1) = xyzh(1,j) - xi
+        rij(2) = xyzh(2,j) - yi
+        rij(3) = xyzh(3,j) - zi
+        !hi = xyzh(4,j)
+        hi = h0(j)
+        if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+           if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+        endif
         rij2 = dot_product(rij,rij)
-        q2 = rij2/(xyzh(4,i)*xyzh(4,i))
+        q2   = rij2*hi12    ! 0 < q < 2 therefore 0 < q2 < 4
 
         if (q2 < radkern2) then
-          hij = 0.5*(xyzh(4,i) + xyzh(4,j))
-          f = (hij/(sqrt(rij2) + epsilon(rij2)))**2 - f_const
-          !if (i==1) print*,sqrt(rij2),2.*xyzh(4,i),f,rij/sqrt(rij2)
-          shifts(:,i) = shifts(:,i) + xyzh(4,i)*f*rij/sqrt(rij2)
+           if (Diehl) then
+              hij = 0.5*(hi + hj)
+              f   = (hij/(sqrt(rij2) + epsilon(rij2)))**2 - f_const       ! without constant and epsilon,  inf > f > 0.25
+              shifts(:,i) = shifts(:,i) + hi*f*rij/sqrt(rij2)
+           else
+              rij2 = rij2 + (0.01*hi)**2
+              f    = -1./rij2
+             shifts(:,i) = shifts(:,i) + hi*f*rij/sqrt(rij2)
+          endif
         endif
       enddo over_npart
     endif
  enddo
-
  ! Final form
- shifts = shifts*mu
+ if (Diehl) then
+    shifts = shifts*mu
+ else
+    shifts = -shifts*mu*10.
+ endif
 
  ! Check, do any of the shifts correspond to more than the box size?
  maxshift = maxval(abs(shifts))
  if (maxshift > 0.5) print*,'WARNING SHIFTS ARE LARGE',maxshift
 
- ! Now apply the shifts
+ ! Now apply the shifts and update for periodicity
  xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
+ if (periodic) then
+    really_far = .true.
+    do while (really_far)
+       !print*, 're-checking periodic at mu=',mu
+       really_far = .false.
+       call shift_for_periodicity(npart,xyzh)
+       do i = 1,npart
+          if (xyzh(1,i) < xmin) really_far = .true.
+          if (xyzh(2,i) < ymin) really_far = .true.
+          if (xyzh(3,i) < zmin) really_far = .true.
+          if (xyzh(1,i) > xmax) really_far = .true.
+          if (xyzh(2,i) > ymax) really_far = .true.
+          if (xyzh(3,i) > zmax) really_far = .true.
+          if (xyzh(4,i) > 0.5) print*, 'big h at i: ',xyzh(4,i),i
+       enddo
+    enddo
+ endif
+
+ if (local_debug) then
+    write(333,*) ' '
+    do i = 1,npart
+       write(333,*) xyzh(1:4,i),shifts(:,i)/xyzh(4,i),rhoh(xyzh(4,i),massoftype(isplit))
+    enddo
+ endif
 
 end subroutine shift_particles_WVT
 
@@ -366,4 +416,29 @@ subroutine make_split_ghost(iighost,ireal,npartoftype,npart,nchild,xyzh,vxyzu)
 
 end subroutine make_split_ghost
 
+!-----------------------------------------------------------------------
+!+
+! enforce periodicity
+! This really should be a routine elsewhere, but it's not
+!+
+!-----------------------------------------------------------------------
+subroutine shift_for_periodicity(npart,xyzh)
+ use boundary, only:cross_boundary
+ use domain,   only:isperiodic
+ integer, intent(in)    :: npart
+ real,    intent(inout) :: xyzh(:,:)
+ integer                :: i,ncross
+
+ ncross = 0
+ !$omp parallel do schedule(static) default(none) &
+ !$omp shared(npart,isperiodic,xyzh) &
+ !$omp private(i) &
+ !$omp reduction(+:ncross)
+ do i = 1,npart
+    call cross_boundary(isperiodic,xyzh(:,i),ncross)
+ enddo
+ !$omp end parallel do
+
+end subroutine shift_for_periodicity
+!-----------------------------------------------------------------------
 end module splitmergeutils

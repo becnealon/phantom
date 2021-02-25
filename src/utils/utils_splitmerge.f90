@@ -171,66 +171,158 @@ end subroutine shift_particles
 !+
 !-----------------------------------------------------------------------
 subroutine shift_particles_WVT(npart,xyzh,h0,mu)
- use kernel, only:radkern2
+ use kernel, only:radkern2,cnormk,kernel_softening
  use part,   only:isdead_or_accreted,iactive,iphase,periodic,rhoh,massoftype,isplit
  use boundary, only: dxbound,dybound,dzbound,xmin,xmax,ymin,zmin,zmax,ymax
  real, intent(inout)    :: xyzh(:,:),h0(:)
  real, intent(in)    :: mu
  integer, intent(in) :: npart
- integer             :: i,j
- real                :: rij2,f,hij,hi12,f_const,xi,yi,zi,hi,hj
- real                :: q2,rij(3)
- real                :: shifts(3,npart),maxshift
+ integer             :: i,j,k,k1,k3,kmax
+ real                :: rij2,f,hij,hi12,hi14,f_const,xi,yi,zi,hi,xj,yj,zj,hj,fmax,hcoef,dummy,fcoef
+ real                :: q,q2,rij(3)
+ real                :: shifts(6,npart),maxshift
  logical             :: really_far
- logical             :: Diehl = .false.
- logical             :: local_debug = .true.
+ logical             :: Diehl = .false.              ! use the Diehl+2015 equation; else use JW's
+ logical             :: local_debug = .true.         ! print out a useful fort file to watch the particle shifting
+ logical             :: dist_plus_const = .false.    ! r2 = r2 + (0.01*hi)**2; else r2 = r2
+ logical             :: local_kernel = .false.       ! calculate forces from the kernel; else f \propto 1/r2
+ logical             :: indiv_scalar = .false.       ! scale the max distance on a per-particle basis, not globally
 
 
- shifts = 0.
+ if (Diehl) then
+    kmax = 1
+ else
+    kmax = 2
+ endif
+ shifts  = 0.
  f_const = 0.25 ! to ensure that f = 0 at 2h
- do i = 1,npart !for each active particle
-   ! CHECK ITS ACTIVE
-   if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
-     xi = xyzh(1,i)
-     yi = xyzh(2,i)
-     zi = xyzh(3,i)
-     !hi = xyzh(4,i)
-     hi = h0(i)
-     hi12 = 1.0/(hi*hi)
-     over_npart: do j = 1,npart
-        if (i == j) cycle over_npart
-        rij(1) = xyzh(1,j) - xi
-        rij(2) = xyzh(2,j) - yi
-        rij(3) = xyzh(3,j) - zi
-        !hi = xyzh(4,j)
-        hi = h0(j)
-        if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
-           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
-           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
-           if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
-        endif
-        rij2 = dot_product(rij,rij)
-        q2   = rij2*hi12    ! 0 < q < 2 therefore 0 < q2 < 4
-
-        if (q2 < radkern2) then
-           if (Diehl) then
-              hij = 0.5*(hi + hj)
-              f   = (hij/(sqrt(rij2) + epsilon(rij2)))**2 - f_const       ! without constant and epsilon,  inf > f > 0.25
-              shifts(:,i) = shifts(:,i) + hi*f*rij/sqrt(rij2)
-           else
-              rij2 = rij2 + (0.01*hi)**2
-              f    = -1./rij2
-             shifts(:,i) = shifts(:,i) + hi*f*rij/sqrt(rij2)
-          endif
-        endif
-      enddo over_npart
+ fmax    = 0.
+ hcoef   = 2. ! kinda like mu, but constant
+ do k = 1,kmax
+    if (k==1) then
+       k1 = 1
+       k3 = 3
+    else
+       k1 = 4
+       k3 = 6
     endif
+    fcoef = 1.
+    if (fmax > 1.) fcoef = 1./fmax
+!$omp parallel default(none) &
+!$omp shared(npart,iphase,xyzh,h0,shifts,k,k1,k3,f_const,dxbound,dybound,dzbound,hcoef) &
+!$omp shared(Diehl,dist_plus_const,local_kernel,local_debug,xmin,fcoef,indiv_scalar) &
+!$omp private(xi,yi,zi,hi,xj,yj,zj,hj,hi12,hi14,rij,rij2,q2,q,hij,f,dummy) &
+!$omp reduction(max:fmax)
+!$omp do
+    do i = 1,npart !for each active particle
+       ! CHECK ITS ACTIVE
+       if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+          hi = h0(i) !xyzh(4,i)
+          if (k==1) then
+             xi = xyzh(1,i)
+             yi = xyzh(2,i)
+             zi = xyzh(3,i)
+          else
+             if (indiv_scalar) then
+                fcoef = sqrt(dot_product(shifts(1:3,i),shifts(1:3,i)))
+                if (fcoef > 1.) then
+                   fcoef = 1./fcoef
+                else
+                   fcoef = 1.
+                endif
+             endif
+             xi = xyzh(1,i)+shifts(1,i)*0.1*hcoef*hi*fcoef
+             yi = xyzh(2,i)+shifts(2,i)*0.1*hcoef*hi*fcoef
+             zi = xyzh(3,i)+shifts(3,i)*0.1*hcoef*hi*fcoef
+             if (xi < xmin) print*, 'crap',xi
+          endif
+          hi12 = 1.0/(hi*hi)
+          hi14 = hi12*hi12
+          over_npart: do j = 1,npart
+             if (i == j) cycle over_npart
+             hj = h0(j)
+             if (k==1) then
+                xj = xyzh(1,j)
+                yj = xyzh(2,j)
+                zj = xyzh(3,j)
+             else
+                if (indiv_scalar) then
+                   fcoef = sqrt(dot_product(shifts(1:3,j),shifts(1:3,j)))
+                   if (fcoef > 1.) then
+                      fcoef = 1./fcoef
+                   else
+                      fcoef = 1.
+                   endif
+                endif
+                xj = xyzh(1,j)+shifts(1,j)*0.1*hcoef*hj*fcoef
+                yj = xyzh(2,j)+shifts(2,j)*0.1*hcoef*hj*fcoef
+                zj = xyzh(3,j)+shifts(3,j)*0.1*hcoef*hj*fcoef
+             endif
+             rij(1) = xj - xi
+             rij(2) = yj - yi
+             rij(3) = zj - zi
+             if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+                if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+                if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+                if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+             endif
+             rij2 = dot_product(rij,rij)
+             q2   = rij2*hi12    ! 0 < q < 2 therefore 0 < q2 < 4
+
+             if (q2 < radkern2 .or. .true.) then  ! Might want to play with what h / combination of h we use for q
+                if (Diehl) then
+                   hij = 0.5*(hi + hj)
+                   f   = (hij/(sqrt(rij2) + epsilon(rij2)))**2 - f_const       ! without constant and epsilon,  inf > f > 0.25
+                   shifts(1:3,i) = shifts(1:3,i) + hi*f*rij/sqrt(rij2)
+                else
+                   if (dist_plus_const) rij2 = rij2 + (0.01*hi)**2
+                   if (local_kernel) then
+                      q = sqrt(q2)
+                      call kernel_softening(q2,q,dummy,f)
+                      f = -f*cnormk*hi14/(hi*hj)
+                   else
+                      f = -1./(hi*hj*rij2)  ! The h's are proxy for density which is a proxy for mass
+                   endif
+                   shifts(k1:k3,i) = shifts(k1:k3,i) + f*rij/sqrt(rij2)
+                endif
+             endif
+          enddo over_npart
+          fmax = max(fmax,sqrt(dot_product(shifts(k1:k3,i),shifts(k1:k3,i))))
+       endif
+    enddo
+!$omp enddo
+!$omp end parallel
+    if (local_debug) print*, mu,fmax
  enddo
  ! Final form
  if (Diehl) then
     shifts = shifts*mu
  else
-    shifts = -shifts*mu*10.
+    shifts(1:3,:) = 0.5*(shifts(1:3,:)+shifts(4:6,:))
+!$omp parallel default(none) &
+!$omp shared(npart,h0,shifts,hcoef,fmax,indiv_scalar) &
+!$omp private(i,hi,fcoef)
+!$omp do
+    do i = 1,npart
+       hi = h0(i)
+       if (indiv_scalar) then
+          fcoef = sqrt(dot_product(shifts(1:3,i),shifts(1:3,i)))
+          if (fcoef > 1.) then
+             fcoef = 1./fcoef
+          else
+             fcoef = 1.
+          endif
+          shifts(1:3,i) = -0.1*hcoef*hi*shifts(1:3,i)*fcoef
+       else
+          if (fmax < 1.) then
+             shifts(1:3,i) = -0.1*hcoef*hi*shifts(1:3,i)
+          else
+             shifts(1:3,i) = -0.1*hcoef*hi*shifts(1:3,i)/fmax
+          endif
+       endif
+    enddo
+!$omp enddo
+!$omp end parallel
  endif
 
  ! Check, do any of the shifts correspond to more than the box size?
@@ -238,7 +330,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
  if (maxshift > 0.5) print*,'WARNING SHIFTS ARE LARGE',maxshift
 
  ! Now apply the shifts and update for periodicity
- xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
+ xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts(1:3,1:npart)
  if (periodic) then
     really_far = .true.
     do while (really_far)
@@ -260,7 +352,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
  if (local_debug) then
     write(333,*) ' '
     do i = 1,npart
-       write(333,*) xyzh(1:4,i),shifts(:,i)/xyzh(4,i),rhoh(xyzh(4,i),massoftype(isplit))
+       write(333,*) xyzh(1:4,i),shifts(1:3,i)/xyzh(4,i),rhoh(xyzh(4,i),massoftype(isplit))
     enddo
  endif
 

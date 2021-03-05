@@ -34,7 +34,7 @@ module splitmergeutils
 !--------------------------------------------------------------------------
 subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
- use part,        only:copy_particle_all,igas,isplit,set_particle_type,kill_particle
+ use part,        only:copy_particle_all,igas,isplit,set_particle_type,kill_particle,iphase
  use random,      only:ran2
  use physcon,     only:pi
  use vectorutils, only:rotatevec
@@ -89,6 +89,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,i
     !--fix parent
     xyzh(4,iparent) = xyzh(4,iparent)*dhfac
     call set_particle_type(iparent,isplit)
+!    iphase(iparent) = -abs(iphase(iparent))
 
     !-- tidy up particle types
     npartoftype(igas)   = npartoftype(igas)   - 1
@@ -132,7 +133,9 @@ subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
  real                :: shifts(3,npart)
  real                :: rnaught,rij2,dr3,vel2,vmax
  real                :: q2,rij(3),rsum(3)
+ logical             :: jhw = .false.
 
+ if (jhw) print*, 'using minor modifications of jhw'
  vmax = tiny(vmax)
  vel2 = 0.
  shifts = 0.
@@ -142,7 +145,11 @@ subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
     neighbours = 0
     rsum = 0.
     vel2 = dot_product(vxyzu(1:3,i),vxyzu(1:3,i))
-    if (vel2 > vmax) vmax = vel2
+    if (jhw) then
+       vmax = vel2
+    else
+       if (vel2 > vmax) vmax = vel2
+    endif
 
     over_npart: do j = 1,npart
        if (i == j) cycle over_npart
@@ -159,6 +166,10 @@ subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
        if (q2 < radkern2) then
           neighbours = neighbours + 1
           rnaught = rnaught + sqrt(rij2)
+          if (jhw) then
+             vel2 = dot_product(vxyzu(1:3,j),vxyzu(1:3,j))
+             vmax = max(vel2,vmax)
+          endif
        endif
 
        dr3 = 1./(rij2**1.5)
@@ -167,9 +178,10 @@ subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
 
     rnaught = rnaught/neighbours
     shifts(:,i) = beta*rnaught*rnaught*deltat*rsum
+    if (jhw) shifts(:,i) = shifts(:,i)*sqrt(vmax)/neighbours
  enddo
  ! Final scaling
- shifts = shifts*sqrt(vel2)
+ if (.not. jhw) shifts = shifts*sqrt(vel2)
  ! Apply shifts
  xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
 
@@ -192,23 +204,25 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
  real                :: rij2,f,hij,hi12,hi14,f_const,xi,yi,zi,hi,xj,yj,zj,hj,fmax,hcoef,dummy,fcoef
  real                :: q,q2,rij(3)
  real                :: shifts(6,npart),maxshift
- logical             :: really_far
- logical             :: Diehl = .false.              ! use the Diehl+2015 equation; else use JW's
- logical             :: local_debug = .true.         ! print out a useful fort file to watch the particle shifting
+ logical             :: really_far,all_r
+ logical             :: Diehl = .true.              ! use the Diehl+2015 equation; else use JW's
+ logical             :: local_debug = .false.         ! print out a useful fort file to watch the particle shifting
  logical             :: dist_plus_const = .false.    ! r2 = r2 + (0.01*hi)**2; else r2 = r2
  logical             :: local_kernel = .false.       ! calculate forces from the kernel; else f \propto 1/r2
  logical             :: indiv_scalar = .false.       ! scale the max distance on a per-particle basis, not globally
 
 
  if (Diehl) then
-    kmax = 1
+    kmax  = 1
+    all_r = .false.
  else
-    kmax = 2
+    kmax  = 2
+    all_r = .true.
  endif
  shifts  = 0.
  f_const = 0.25 ! to ensure that f = 0 at 2h
  fmax    = 0.
- hcoef   = 2. ! kinda like mu, but constant
+ hcoef   = 1. ! kinda like mu, but constant
  do k = 1,kmax
     if (k==1) then
        k1 = 1
@@ -221,8 +235,9 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
     if (fmax > 1.) fcoef = 1./fmax
 !$omp parallel default(none) &
 !$omp shared(npart,iphase,xyzh,h0,shifts,k,k1,k3,f_const,dxbound,dybound,dzbound,hcoef) &
-!$omp shared(Diehl,dist_plus_const,local_kernel,local_debug,xmin,fcoef,indiv_scalar) &
+!$omp shared(Diehl,dist_plus_const,local_kernel,local_debug,xmin,indiv_scalar,all_r) &
 !$omp private(xi,yi,zi,hi,xj,yj,zj,hj,hi12,hi14,rij,rij2,q2,q,hij,f,dummy) &
+!$omp firstprivate(fcoef) &
 !$omp reduction(max:fmax)
 !$omp do
     do i = 1,npart !for each active particle
@@ -280,7 +295,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
              rij2 = dot_product(rij,rij)
              q2   = rij2*hi12    ! 0 < q < 2 therefore 0 < q2 < 4
 
-             if (q2 < radkern2 .or. .true.) then  ! Might want to play with what h / combination of h we use for q
+             if (q2 < radkern2 .or. all_r) then  ! Might want to play with what h / combination of h we use for q
                 if (Diehl) then
                    hij = 0.5*(hi + hj)
                    f   = (hij/(sqrt(rij2) + epsilon(rij2)))**2 - f_const       ! without constant and epsilon,  inf > f > 0.25
@@ -293,6 +308,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
                       f = -f*cnormk*hi14/(hi*hj)
                    else
                       f = -1./(hi*hj*rij2)  ! The h's are proxy for density which is a proxy for mass
+!                      f = -1./rij2  ! [no difference between this and our case above]
                    endif
                    shifts(k1:k3,i) = shifts(k1:k3,i) + f*rij/sqrt(rij2)
                 endif
@@ -310,12 +326,17 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
     shifts = shifts*mu
  else
     shifts(1:3,:) = 0.5*(shifts(1:3,:)+shifts(4:6,:))
+    if (fmax < 1.0) then
+       fcoef = 1.0
+    else
+       fcoef = 1.0/fmax
+    endif
 !$omp parallel default(none) &
 !$omp shared(npart,h0,shifts,hcoef,fmax,indiv_scalar) &
-!$omp private(i,hi,fcoef)
+!$omp firstprivate(fcoef) &
+!$omp private(i)
 !$omp do
     do i = 1,npart
-       hi = h0(i)
        if (indiv_scalar) then
           fcoef = sqrt(dot_product(shifts(1:3,i),shifts(1:3,i)))
           if (fcoef > 1.) then
@@ -323,14 +344,8 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
           else
              fcoef = 1.
           endif
-          shifts(1:3,i) = -0.1*hcoef*hi*shifts(1:3,i)*fcoef
-       else
-          if (fmax < 1.) then
-             shifts(1:3,i) = -0.1*hcoef*hi*shifts(1:3,i)
-          else
-             shifts(1:3,i) = -0.1*hcoef*hi*shifts(1:3,i)/fmax
-          endif
        endif
+       shifts(1:3,i) = -0.1*hcoef*h0(i)*shifts(1:3,i)*fcoef
     enddo
 !$omp enddo
 !$omp end parallel
@@ -365,6 +380,17 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
     do i = 1,npart
        write(333,*) xyzh(1:4,i),shifts(1:3,i)/xyzh(4,i),rhoh(xyzh(4,i),massoftype(isplit))
     enddo
+
+    if (npart < 1000 .and. mu < 2.d-5) then
+       do i = 1,npart
+          do j = 1,npart
+             write(666,*) i,j,sqrt(dot_product((xyzh(1:3,i)-xyzh(1:3,j)),(xyzh(1:3,i)-xyzh(1:3,j))))
+          enddo
+          write(666,*) ' '
+          write(777,*) i,xyzh(1:3,i)
+       enddo
+       write(777,*) ' '
+    endif
  endif
 
 end subroutine shift_particles_WVT

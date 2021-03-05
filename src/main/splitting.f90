@@ -31,7 +31,10 @@ module split
  integer, parameter, public  :: nchild = 12
  integer, parameter :: nchild_in = nchild + 1
  integer, save      :: children_list(nchild_in) = 0
- real, public       :: splitrad,splitbox(4),gzw
+ ! initialise to 0 to prevent errors when writing to .in file
+ real, public       :: splitrad = 0.
+ real, public       :: splitbox(4) = 0.
+ real, public       :: gzw = 0.
 
 contains
 

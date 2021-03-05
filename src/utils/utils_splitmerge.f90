@@ -121,18 +121,21 @@ end subroutine sample_kernel
 ! (currently mostly used in testing, not sure if it's important yet)
 !+
 !-----------------------------------------------------------------------
-subroutine shift_particles(npart,xyzh,vxyzu,deltat,beta,shifts)
+subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
  use kernel, only:radkern2
- real, intent(in)    :: xyzh(:,:),vxyzu(:,:)
+ use boundary, only: dxbound,dybound,dzbound
+ use part,     only: periodic
+ real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
  real, intent(in)    :: deltat,beta
  integer, intent(in) :: npart
- real, intent(out)   :: shifts(3,npart)
  integer             :: i,j,neighbours
+ real                :: shifts(3,npart)
  real                :: rnaught,rij2,dr3,vel2,vmax
  real                :: q2,rij(3),rsum(3)
 
  vmax = tiny(vmax)
  vel2 = 0.
+ shifts = 0.
 
  do i = 1,npart
     rnaught = 0.
@@ -144,6 +147,12 @@ subroutine shift_particles(npart,xyzh,vxyzu,deltat,beta,shifts)
     over_npart: do j = 1,npart
        if (i == j) cycle over_npart
        rij = xyzh(1:3,j) - xyzh(1:3,i)
+       if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+          if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+          if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+          if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+       endif
+
        rij2 = dot_product(rij,rij)
        q2 = rij2/(xyzh(4,i)*xyzh(4,i))
 
@@ -159,10 +168,12 @@ subroutine shift_particles(npart,xyzh,vxyzu,deltat,beta,shifts)
     rnaught = rnaught/neighbours
     shifts(:,i) = beta*rnaught*rnaught*deltat*rsum
  enddo
-
+ ! Final scaling
  shifts = shifts*sqrt(vel2)
+ ! Apply shifts
+ xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
 
-end subroutine shift_particles
+end subroutine shift_particles_Vacondio
 
 !-----------------------------------------------------------------------
 !+
@@ -532,5 +543,6 @@ subroutine shift_for_periodicity(npart,xyzh)
  !$omp end parallel do
 
 end subroutine shift_for_periodicity
+
 !-----------------------------------------------------------------------
 end module splitmergeutils

@@ -96,7 +96,7 @@ subroutine initialise()
 !
 !--initialise openMP things if required
 !
- if (id==master) call print_cpuinfo()
+! if (id==master) call print_cpuinfo()
  if (id==master) call info_omp
  call init_omp
 !

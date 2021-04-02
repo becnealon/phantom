@@ -122,20 +122,20 @@ end subroutine sample_kernel
 ! (currently mostly used in testing, not sure if it's important yet)
 !+
 !-----------------------------------------------------------------------
-subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
+subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta,shifts)
  use kernel, only:radkern2
  use boundary, only: dxbound,dybound,dzbound
  use part,     only: periodic
  real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
  real, intent(in)    :: deltat,beta
  integer, intent(in) :: npart
+ real, intent(out)   :: shifts(3,npart)
  integer             :: i,j,neighbours
- real                :: shifts(3,npart)
  real                :: rnaught,rij2,dr3,vel2,vmax
  real                :: q2,rij(3),rsum(3)
- logical             :: jhw = .false.
+ logical             :: jhw = .true.
 
- if (jhw) print*, 'using minor modifications of jhw'
+ !if (jhw) print*, 'using minor modifications of jhw'
  vmax = tiny(vmax)
  vel2 = 0.
  shifts = 0.
@@ -181,9 +181,9 @@ subroutine shift_particles_Vacondio(npart,xyzh,vxyzu,deltat,beta)
     if (jhw) shifts(:,i) = shifts(:,i)*sqrt(vmax)/neighbours
  enddo
  ! Final scaling
- if (.not. jhw) shifts = shifts*sqrt(vel2)
- ! Apply shifts
- xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
+ if (.not. jhw) shifts = shifts*sqrt(vmax)
+ ! Apply shifts - turned off for the moment
+ !xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts
 
 end subroutine shift_particles_Vacondio
 
@@ -353,7 +353,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu)
 
  ! Check, do any of the shifts correspond to more than the box size?
  maxshift = maxval(abs(shifts))
- if (maxshift > 0.5) print*,'WARNING SHIFTS ARE LARGE',maxshift
+ !if (maxshift > 0.5) print*,'WARNING SHIFTS ARE LARGE',maxshift
 
  ! Now apply the shifts and update for periodicity
  xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - shifts(1:3,1:npart)
@@ -569,6 +569,57 @@ subroutine shift_for_periodicity(npart,xyzh)
  !$omp end parallel do
 
 end subroutine shift_for_periodicity
+
+!-----------------------------------------------------------------------
+!+
+! quick and dirty routine to calculate the density from positions
+!+
+!-----------------------------------------------------------------------
+subroutine quick_rho(npart,xyzh_in,rho_ave)
+use kernel, only:get_kernel,cnormk,radkern
+use part,   only:iamsplit,igas,isplit,massoftype,iphase,periodic
+use boundary, only: dxbound,dybound,dzbound
+integer, intent(in) :: npart
+real,    intent(in) :: xyzh_in(:,:)
+real,    intent(out) :: rho_ave
+real :: mass,h1,h31,rho_i,rij_vec(3),qij,wchild,rij,grkernchild
+integer :: i,j
+
+  rho_ave = 0.
+  do i=1,npart
+     h1 = 1./xyzh_in(4,i)
+     h31 = h1**3
+     rho_i = 0.
+
+     do j = 1,npart
+       if (iamsplit(iphase(j))) then
+         mass = massoftype(isplit)
+       else
+         mass = massoftype(igas)
+       endif
+
+       rij_vec = xyzh_in(1:3,i) - xyzh_in(1:3,j)
+       if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+          if (abs(rij_vec(1)) > 0.5*dxbound) rij_vec(1) = rij_vec(1) - dxbound*SIGN(1.0,rij_vec(1))
+          if (abs(rij_vec(2)) > 0.5*dybound) rij_vec(2) = rij_vec(2) - dybound*SIGN(1.0,rij_vec(2))
+          if (abs(rij_vec(3)) > 0.5*dzbound) rij_vec(3) = rij_vec(3) - dzbound*SIGN(1.0,rij_vec(3))
+       endif
+
+       rij = sqrt(dot_product(rij_vec,rij_vec))
+       qij = rij*h1
+
+       wchild = 0.
+       if (qij < radkern) call get_kernel(qij*qij,qij,wchild,grkernchild)
+
+       rho_i = rho_i + (mass*wchild*cnormk*h31)
+     enddo
+     rho_ave = rho_ave + rho_i
+  enddo
+
+  rho_ave = rho_ave/real(npart)
+
+end subroutine quick_rho
+
 
 !-----------------------------------------------------------------------
 end module splitmergeutils

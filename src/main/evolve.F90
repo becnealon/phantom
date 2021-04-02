@@ -105,6 +105,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #ifdef SPLITTING
   use split,           only:update_splitting
   use part,            only:npartoftype
+  use splitmergeutils, only:quick_rho
 #endif
 
  character(len=*), intent(in)    :: infile
@@ -133,6 +134,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 #ifdef SPLITTING
   logical        :: need_to_relax
+  real           :: rho_ave
 #endif
  logical         :: fulldump,abortrun,at_dump_time
  logical         :: should_conserve_energy,should_conserve_momentum,should_conserve_angmom
@@ -233,6 +235,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
+  !call quick_rho(npart,xyzh,rho_ave)
   call update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
 #endif
 
@@ -266,7 +269,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
-  if (need_to_relax) call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart)
+  !if (need_to_relax) call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave)
 #endif
 
     if (gravity .and. icreate_sinks > 0 .and. ipart_rhomax /= 0) then
@@ -644,25 +647,30 @@ end subroutine print_timinginfo
 !  (this will need to be re-written into other routines)
 !+
 !----------------------------------------------------------------
-subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart)
+subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref)
   use dim,  only: maxp_hard
   use part, only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind
   use part, only: gradh,rad,radprop,dvdx
   use densityforce, only:densityiterate
   use splitmergeutils, only:shift_particles_WVT,shift_particles_Vacondio
+  use splitmergeutils, only:quick_rho
   use timestep,        only:dt
   use timestep_ind,    only:nactive
   real, intent(inout) :: xyzh(:,:),vxyzu(:,:),h0(:)
   integer, intent(in) :: npart
-  real :: stressmax,mu,dmu,beta
+  real, intent(in)    :: rho_ref
+  real :: stressmax,mu,dmu,beta,xyzh_ref(4,npart),shifts(3,npart),rho_ave
+  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d
   integer :: nshifts,i
   character(len=40) :: shift_type
+  logical :: converged
 
-  shift_type = 'Vacondio'
+  shift_type = 'WVT'
+  xyzh_ref(:,:) = xyzh(1:4,1:npart)
 
   if (shift_type == 'WVT') then
-    nshifts = 100.
-    mu = 0.002
+    nshifts = 50
+    mu = -0.0004
 
     dmu = real(mu/(nshifts+1))
 
@@ -680,10 +688,63 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart)
     enddo
   elseif (shift_type == 'Vacondio') then
 
-    beta = 0.75
+    ! Testing: iterate using the Golden Ratio method to find the best beta value
+    ! (tedious, slow and yucky we delete asap)
 
-    call shift_particles_Vacondio(npart,xyzh,vxyzu,dt,beta)
-    print*,'shifted by Vacondio method'
+    ! Set up boundaries
+    beta_a = 0.0
+    beta_d = 6.0
+    call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_a,shifts)
+    xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+    call quick_rho(npart,xyzh,rho_a)
+    call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_d,shifts)
+    xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+    call quick_rho(npart,xyzh,rho_d)
+
+    ! Iterate
+    converged = .false.
+    do while (.not.converged)
+      ! Calculate intervals
+      beta_b = beta_a + ((beta_d - beta_a)/(1.+1.618))
+      beta_c = beta_a + beta_d - beta_b
+
+      ! Evaluate how good each one is
+      call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_b,shifts)
+      xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+      call quick_rho(npart,xyzh,rho_b)
+
+      call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_c,shifts)
+      xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+      call quick_rho(npart,xyzh,rho_c)
+
+      print*,'calculated',rho_a,rho_b,rho_c,rho_d,'-------',rho_ref
+
+    ! Now, which way to go?
+    if (abs(rho_b - rho_ref) < 0.05) then
+      converged = .true.
+      beta = beta_b
+      rho_ave = rho_b
+    endif
+
+    if (abs(rho_c - rho_ref) < 0.05) then
+      converged = .true.
+      beta = beta_c
+      rho_ave = rho_c
+    endif
+
+    if (rho_a < rho_c .or. rho_b < rho_c) then
+      beta_d = beta_c
+      rho_d = rho_c
+    else
+      beta_a = beta_b
+      rho_a = rho_b
+    endif
+  enddo
+
+  call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta,shifts)
+  xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+
+  print*,'shifted by Vacondio method, new rho_ave',rho_ave
   else
     print*,'No shift done, check shift type'
   endif

@@ -126,26 +126,46 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  logical, intent(inout) :: need_to_relax
  integer                :: i,k,add_npart,oldsplits,oldreals
- logical                :: split_it,ghost_it,already_split
+ logical                :: split_it,ghost_it,already_split,rln
  logical                :: make_ghost,send_to_list
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
+ real :: orbit
 
+ rln = .true.
+ need_to_relax = .false.
+ oldsplits = npartoftype(isplit)
+ oldreals = npartoftype(igas)
 
-  ! Reset the boundaries depending on time
-  need_to_relax = .false.
-  oldsplits = npartoftype(isplit)
-  oldreals = npartoftype(igas)
+ if (rln) then
+  ! Hack for testing
   gzw = 0.
-  if (time < 0.2 .or. time > 0.4) then
+  ! Override the splitbox size
   splitbox(:) = 0.
-  else
-  splitbox(1) = 0.5
-  splitbox(2) = 0.5
-  splitbox(3) = -0.5
-  splitbox(4) = -0.5
-  endif
 
+  ! When to do a split or a merge? Can use for either box or disc tests
+  orbit = 0.2 !0.25*2.*3.1415926535*5.**1.5
+
+  if (time > 1.*orbit .and. time < 2.*orbit .and. npartoftype(isplit)==0) call split_it_all(npart,xyzh,vxyzu)
+
+  if (time > 2.*orbit .and. time < 3.*orbit .and. npartoftype(igas)==0) call merge_it_all(npart,xyzh,vxyzu)
+
+  if (time > 3.*orbit .and. time < 4.*orbit .and. npartoftype(isplit)==0) call split_it_all(npart,xyzh,vxyzu)
+
+  if (time > 4.*orbit .and. time < 5.*orbit .and. npartoftype(igas)==0) call merge_it_all(npart,xyzh,vxyzu)
+
+  if (time > 5.*orbit .and. time < 6.*orbit .and. npartoftype(isplit)==0) call split_it_all(npart,xyzh,vxyzu)
+
+  if (time > 6.*orbit .and. time < 7.*orbit .and. npartoftype(igas)==0) call merge_it_all(npart,xyzh,vxyzu)
+
+  if (time > 7.*orbit .and. time < 8.*orbit .and. npartoftype(isplit)==0) call split_it_all(npart,xyzh,vxyzu)
+
+  if (time > 8.*orbit .and. time < 9.*orbit .and. npartoftype(igas)==0) call merge_it_all(npart,xyzh,vxyzu)
+
+  if (time > 9.*orbit .and. npartoftype(isplit)==0) call split_it_all(npart,xyzh,vxyzu)
+
+  return !for testing
+endif
 
  if (rand_type /= 5) then
     call fatal('update_splitting','this routine is set up only for rand_type==5')
@@ -225,12 +245,783 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  deallocate(xyzh_split)
  deallocate(ioriginal)
 
- ! Do we need to shuffle the particles later? If you never want to, comment out below
+ ! Do we need to shuffle the particles later in evolve? If you never want to, comment out below
  if (npartoftype(igas) /= oldreals .or. npartoftype(isplit) /= oldsplits) need_to_relax = .true.
 
  if (periodic) call shift_for_periodicity(npart,xyzh)
 
 end subroutine update_splitting
+
+!----------------------------------------------------------------
+!+
+! Testing routine that splits everything and minimises global error
+!+
+!----------------------------------------------------------------
+subroutine split_it_all(npart,xyzh,vxyzu)
+  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
+  use random,      only:ran2
+  use vectorutils, only:rotatevec
+  use physcon,     only:pi
+  use splitmergeutils, only:shift_particles_WVT
+  use part,        only:set_particle_type,igas,npartoftype,isplit
+  use part,        only:iactive,iphase,isdead_or_accreted
+  use timestep,    only:dt
+  real, intent(inout) :: xyzh(:,:),vxyzu(:,:)
+  integer, intent(inout) :: npart
+  real :: parents(4,npart)
+  real, allocatable, dimension(:,:) :: kids_ref,shifts
+  integer :: ii
+  integer :: nshifts,nkids,test_ind,add_npart
+  real :: err_a,err_b,err_c,err_d,error_p
+  real :: mu,test(4),mu_test(4),tol
+  logical :: minimum_found
+  character(len=40) :: shuffle_type,error_metric_type
+
+  ! Things to choose
+  shuffle_type = 'WVT'                ! Vacondio or WVT
+  error_metric_type = 'Reyes-Lopez'  ! Reyes-Lopez or FeldmanBonet
+
+  ! Initialise
+  nkids = npart*13
+  add_npart = 0
+  tol = 0.01 !1% between errors
+
+  ! Store the parents separately, evaluate their error
+  parents(:,1:npart) = xyzh(:,1:npart)
+  if (error_metric_type == 'FeldmanBonet') then
+    call calculate_parent_error(npart,parents,error_p) ! only because we're doing all of them
+  else
+    error_p = 0. !to prevent compiler warnings
+  endif
+
+  ! Make *proposed* splits
+  allocate(kids_ref(4,nkids),shifts(3,nkids))
+
+  do ii = 1,npart
+    if (iactive(iphase(ii)) .and. .not.isdead_or_accreted(xyzh(4,ii))) then
+      call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)  ! nchild = 12
+      add_npart = add_npart + nchild
+    endif
+  enddo
+
+  kids_ref = xyzh(1:4,1:nkids)
+
+  ! Shuffle kids till error reduced
+  ! Here we use the Golden Ratio method for rapid testing,
+  ! but in general this should not be used
+  ! Procedure is:
+  ! 1. Shuffle particles somehow
+  ! 2. Evaluate their error somehow
+  ! 3. Repeat this till you get a minimum
+
+  minimum_found = .false.
+
+  ! Set bounds for mu or beta (always call it mu for convenience)
+  if (shuffle_type == 'WVT') then
+    nshifts = 10
+    mu_test(1) = 0.0
+    call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(1))
+  else
+    mu_test(1) = 0.
+    call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(1),shifts)
+    xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
+  endif
+
+  if (error_metric_type == 'Reyes-Lopez') then
+    call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_a)
+  else
+    call calculate_global_error(nkids,npart,xyzh,parents,err_a)
+    err_a = error_p - err_a
+  endif
+
+  ! Reset for next step
+  xyzh(1:4,1:nkids) = kids_ref
+
+  if (shuffle_type == 'WVT') then
+    mu_test(4) = 0.13 ! this comes from Daniel's PDF, should be limited by Courant condition carefully
+    call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(4))
+  else
+    mu_test(4) = 10.
+    call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(4),shifts)
+    xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
+  endif
+
+  if (error_metric_type == 'Reyes-Lopez') then
+    call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_d)
+  else
+    call calculate_global_error(nkids,npart,xyzh,parents,err_d)
+    err_d = error_p - err_d
+  endif
+
+  ! Reset for next step
+  xyzh(1:4,1:nkids) = kids_ref
+
+  print*,'  mu/beta                   error'
+  print*,mu_test(1),err_a
+  print*,mu_test(4),err_d
+
+  ! if the error is always zero (this should *not* happen) let me know
+  if (err_a < tiny(err_a) .and. err_d < tiny(err_d)) then
+    print*,'Something wrong in minimum finding, the error is always zero'
+    stop
+  endif
+
+   do while (.not.minimum_found)
+     mu_test(2) = mu_test(1) + ((mu_test(4) - mu_test(1))/(1.+1.618))
+     mu_test(3) = mu_test(1) + mu_test(4) - mu_test(2)
+
+     ! Do each one
+     if (shuffle_type == 'WVT') then
+       call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(2))
+     else
+       call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(2),shifts)
+       xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
+     endif
+
+     if (error_metric_type == 'Reyes-Lopez') then
+       call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_b)
+     else
+       call calculate_global_error(nkids,npart,xyzh,parents,err_b)
+       err_b = error_p - err_b
+     endif
+
+     ! Reset for next
+     xyzh(1:4,1:nkids) = kids_ref
+
+     if (shuffle_type == 'WVT') then
+       call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(3))
+     else
+       call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(3),shifts)
+       xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
+     endif
+
+     if (error_metric_type == 'Reyes-Lopez') then
+       call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_c)
+     else
+       call calculate_global_error(nkids,npart,xyzh,parents,err_c)
+       err_c = error_p - err_c
+     endif
+
+     ! Reset for next
+     xyzh(1:4,1:nkids) = kids_ref
+
+     ! What we're actually trying to minimise
+     test(1) = err_a
+     test(2) = err_b
+     test(3) = err_c
+     test(4) = err_d
+     print*,mu_test(2),err_b
+     print*,mu_test(3),err_c
+
+     if (abs((test(2) - test(3))/test(3)) < tol) then
+       test_ind = minloc(test,dim=1)
+       mu = mu_test(test_ind)
+       minimum_found = .true.
+     endif
+
+     ! if not converged, save for next round
+     if (test(1) < test(3) .or. test(2)< test(3)) then
+       mu_test(4) = mu_test(3)
+       err_d = err_c
+     else
+       mu_test(1) = mu_test(2)
+       err_a = err_b
+     endif
+   enddo
+   print*,'I think I am done, here is the new mu value:',mu,'and error',test(test_ind)
+
+   ! Override parents with the new, shuffled children
+   if (shuffle_type == 'WVT') then
+     call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu)
+   else
+     call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu,shifts)
+     xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
+   endif
+   npart = npart + add_npart
+
+   ! Tidy up
+   deallocate(kids_ref,shifts)
+
+end subroutine split_it_all
+
+!----------------------------------------------------------------
+!+
+! Testing routine that splits everything and minimises global error
+!+
+!----------------------------------------------------------------
+subroutine merge_it_all(npart,xyzh,vxyzu)
+  use part, only:shuffle_part,npartoftype,igas,isplit,iactive,iphase,isdead_or_accreted
+  use timestep, only:dt
+  integer, intent(inout) :: npart
+  real, intent(inout)    :: xyzh(:,:), vxyzu(:,:)
+  real, allocatable, dimension(:,:) :: xyzh_split,parents_ref,shifts
+  integer, allocatable, dimension(:) :: ioriginal
+  integer :: k,i,nkids,nshifts,test_ind
+  logical :: make_ghost,minimum_found
+  real :: err_a,err_b,err_c,err_d
+  real :: err_parent_a,err_parent_d,err_parent_b,err_parent_c
+  real :: mu,test(4),mu_test(4),tol
+  character(len=40) :: shuffle_type,error_metric_type
+
+  ! Things to choose
+  shuffle_type = 'WVT'                ! Vacondio or WVT
+  error_metric_type = 'FeldmanBonet'  ! Reyes-Lopez or FeldmanBonet
+
+  make_ghost = .true. ! this is currently overridden for testing
+  tol = 0.01 !1% difference in error
+
+  ! Store the splits as a reference
+  allocate(xyzh_split(4,npart),ioriginal(npart))
+  xyzh_split(:,1:npart) = xyzh(1:4,1:npart)
+
+  ! Find particles to merge and merge them - for now, we simply send every particle for simplicity
+  ! but this is not appropriate in any other circumstance
+  k = 0
+  do i = 1,npart
+    if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
+      k = k + 1
+      xyzh_split(:,k) = xyzh(1:4,i)
+      ioriginal(k) = i
+    endif
+  enddo
+  nkids = k
+
+  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
+  if (k > nchild_in) call merge_particles(npart,k,xyzh,xyzh_split(:,1:k),ioriginal,npartoftype,make_ghost)
+  call shuffle_part(npart)
+
+  ! Shuffle till error minimised
+  ! Calculate the error of each with respect to the new particle positions
+  allocate(parents_ref(1:4,1:npart),shifts(3,npart))
+  parents_ref = xyzh(1:4,1:npart)
+
+  ! Shuffle parents (keeping kids still) till error reduced
+  ! Here we use the Golden Ratio method for rapid testing,
+  ! but in general this should not be used
+
+  minimum_found = .false.
+
+  if (shuffle_type == 'WVT') then
+    nshifts = 10
+    mu_test(1) = 0.0
+    call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:npart),mu_test(1))
+  else
+    mu_test(1) = 0.
+    call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(1),shifts)
+    xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
+  endif
+
+  if (error_metric_type == 'Reyes-Lopez') then
+    call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_a)
+  else
+    call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_a)
+    call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_a)
+    err_a = err_parent_a - err_a
+  endif
+
+  ! Reset for next
+  xyzh(1:4,1:npart) = parents_ref
+
+  if (shuffle_type == 'WVT') then
+    nshifts = 10
+    mu_test(4) = 0.13 ! this comes from Daniel's PDF, should be limited by Courant condition carefully
+    call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:nkids),mu_test(4))
+  else
+    mu_test(4) = 10.
+    call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(4),shifts)
+    xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
+  endif
+
+  if (error_metric_type == 'Reyes-Lopez') then
+    call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_d)
+  else
+    call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_d)
+    call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_d)
+    err_d = err_parent_d - err_d
+  endif
+
+  ! Reset for next
+  xyzh(1:4,1:npart) = parents_ref
+
+  print*,'  mu/beta                   error'
+  print*,mu_test(1),err_a
+  print*,mu_test(4),err_d
+
+  ! if the error is always zero (this should *not* happen) let me know
+  if (err_a < tiny(err_a) .and. err_d < tiny(err_d)) then
+    print*,'Something wrong in minimum finding, the error is always zero'
+    stop
+  endif
+
+   do while (.not.minimum_found)
+     mu_test(2) = mu_test(1) + ((mu_test(4) - mu_test(1))/(1.+1.618))
+     mu_test(3) = mu_test(1) + mu_test(4) - mu_test(2)
+
+     ! Do each one
+     if (shuffle_type == 'WVT') then
+       call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:nkids),mu_test(2))
+     else
+       call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(2),shifts)
+       xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
+     endif
+
+     if (error_metric_type == 'Reyes-Lopez') then
+       call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_b)
+     else
+       call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_b)
+       call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_b)
+       err_b = err_parent_b - err_b
+     endif
+
+     ! Reset for next
+     xyzh(1:4,1:npart) = parents_ref
+
+     if (shuffle_type == 'WVT') then
+       call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:nkids),mu_test(3))
+     else
+       call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(3),shifts)
+       xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
+     endif
+
+     if (error_metric_type == 'Reyes-Lopez') then
+       call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_c)
+     else
+       call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_c)
+       call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_c)
+       err_c = err_parent_c - err_c
+     endif
+
+     ! Reset for next
+     xyzh(1:4,1:npart) = parents_ref
+
+     ! What we're actually trying to minimise
+     test(1) = err_a
+     test(2) = err_b
+     test(3) = err_c
+     test(4) = err_d
+     print*,mu_test(2),test(2)
+     print*,mu_test(3),test(3)
+
+     if (abs((test(2) - test(3))/test(3)) < tol) then
+       test_ind = minloc(test,dim=1)
+       mu = mu_test(test_ind)
+       minimum_found = .true.
+     endif
+
+     ! if not converged, save for next round
+     if (test(1) < test(3) .or. test(2)< test(3)) then
+       mu_test(4) = mu_test(3)
+       err_d = err_c
+       err_parent_d = err_parent_c
+     else
+       mu_test(1) = mu_test(2)
+       err_a = err_b
+       err_parent_a = err_parent_b
+     endif
+   enddo
+   print*,'I think I am done, here is the new mu value:',mu,'and error',test(test_ind)
+
+  ! Keep final answer
+  if (shuffle_type == 'WVT') then
+    call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:npart),mu)
+  else
+    call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu,shifts)
+    xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
+  endif
+
+  ! Tidy up
+  deallocate(xyzh_split,ioriginal,parents_ref,shifts)
+
+end subroutine merge_it_all
+
+!----------------------------------------------------------------
+!+
+! Testing: WVT loop (so we don't copy this 4 times)
+!+
+!----------------------------------------------------------------
+ subroutine WVT_loop(nshifts,n_in,xyzh_in,h0,mu)
+   use splitmergeutils, only:shift_particles_WVT
+   real, intent(inout) :: xyzh_in(:,:),h0(:)
+   real, intent(in)    :: mu
+   integer, intent(in) :: n_in,nshifts
+   real :: dmu,mu_here
+   integer :: ii
+
+   dmu = real(mu/(nshifts+1))
+   mu_here = mu
+
+   ! Do the shifts loop
+     do ii = 1,nshifts
+
+       ! calculate the shifts according to the WVT method
+       call shift_particles_WVT(n_in,xyzh_in,h0,mu_here)
+
+       ! decrease mu for next go around
+       mu_here = mu_here - dmu
+       !print*,'ran through shifts. mu = ',mu,' for iteration i = ',ii
+     enddo
+
+ end subroutine WVT_loop
+
+
+!----------------------------------------------------------------
+!+
+! Testing: evaluate error of kids
+!+
+!----------------------------------------------------------------
+ subroutine calculate_global_error(nkids,nparents,kids,parents,error)
+   use boundary, only: dxbound,dybound,dzbound
+   use part,     only: periodic,massoftype,isplit
+   use kernel, only:get_kernel,cnormk,radkern,radkern2
+   real, intent(in)    :: kids(:,:),parents(:,:)
+   integer, intent(in) :: nparents,nkids
+   real, intent(out)   :: error
+   integer :: ii,jj
+   real    :: x_p(3),rij(3),rij2,wchild,grkernchild,h1,h31,mchild,qij2
+
+   error = 0.
+   mchild = massoftype(isplit)
+
+   do ii = 1,nparents
+     ! reference parent location
+     x_p = parents(1:3,ii)
+
+     ! now check across all children
+     do jj = 1,nkids
+       h1 = 1./kids(4,jj)
+       h31 = h1**3
+
+       rij = x_p - kids(1:3,jj)
+       if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+          if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+          if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+          if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+       endif
+
+       rij2 = dot_product(rij,rij)
+       qij2 = rij2*h1*h1
+
+       wchild = 0.
+       if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wchild,grkernchild)
+
+       ! Add the error
+       error = error + (mchild*wchild*cnormk*h31)
+
+     enddo
+   enddo
+
+ end subroutine calculate_global_error
+
+ !----------------------------------------------------------------
+ !+
+ ! Testing: evaluate error of parents
+ !+
+ !----------------------------------------------------------------
+  subroutine calculate_parent_error(npart,parents,error)
+    use boundary, only: dxbound,dybound,dzbound
+    use part,     only: periodic,massoftype,igas
+    use kernel, only:get_kernel,cnormk,radkern,radkern2
+    real, intent(in)    :: parents(:,:)
+    integer, intent(in) :: npart
+    real, intent(out)   :: error
+    integer :: ii,jj
+    real    :: x_p(3),rij(3),rij2,wchild,grkernchild,h1,h31,mchild,qij2
+
+    error = 0.
+    mchild = massoftype(igas)
+
+    do ii = 1,npart
+      ! reference parent location
+      x_p = parents(1:3,ii)
+
+      ! now check across all parents
+      do jj = 1,npart
+        h1 = 1./parents(4,jj)
+        h31 = h1**3
+
+        rij = x_p - parents(1:3,jj)
+        if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+           if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+        endif
+
+        rij2 = dot_product(rij,rij)
+        qij2 = rij2*h1*h1
+
+        wchild = 0.
+        if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wchild,grkernchild)
+
+        ! Add the error
+        error = error + (mchild*wchild*cnormk*h31)
+
+      enddo
+    enddo
+
+  end subroutine calculate_parent_error
+
+!----------------------------------------------------------------
+!+
+!  Calculates error in the derivative according to Reyes López et al. 2012
+!+
+!----------------------------------------------------------------
+
+subroutine calculate_RL_error(nparents,parents,nkids,kids,error)
+  use kernel, only:get_kernel,cnormk,radkern2
+  use boundary, only: dxbound,dybound,dzbound
+  use part,     only: periodic
+  integer, intent(in) :: nparents,nkids
+  real, intent(in)    :: parents(:,:),kids(:,:)
+  real, intent(out)   :: error
+  integer :: ii,jj,kk
+  real    :: wkid,grkernkid,wparent,grkernparent,error_kids
+  real    :: h1,rij_vec(3),rij2,qij2
+
+  ! There are about 10 trillion ways to do this faster, let's do the slow way
+  ! for testing
+
+  error = 0.
+
+  ! Use location of parents to evaluate error
+  do ii = 1,1
+
+    ! For each parent
+    do jj = 1,nparents
+
+      h1 = 1./parents(4,jj)
+      rij_vec = parents(1:3,jj) - parents(1:3,ii)
+
+      if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+         if (abs(rij_vec(1)) > 0.5*dxbound) rij_vec(1) = rij_vec(1) - dxbound*SIGN(1.0,rij_vec(1))
+         if (abs(rij_vec(2)) > 0.5*dybound) rij_vec(2) = rij_vec(2) - dybound*SIGN(1.0,rij_vec(2))
+         if (abs(rij_vec(3)) > 0.5*dzbound) rij_vec(3) = rij_vec(3) - dzbound*SIGN(1.0,rij_vec(3))
+      endif
+
+      rij2 = dot_product(rij_vec,rij_vec)
+      qij2 = rij2*h1*h1
+
+      call get_kernel(qij2,sqrt(qij2),wparent,grkernparent)
+      grkernparent = grkernparent*cnormk
+
+      ! Error introduced from the kids (across the whole domain, not just in the family)
+      error_kids  = 0.
+      do kk = 1,nkids
+
+        h1 = 1./kids(4,kk)
+        rij_vec = kids(1:3,kk) - parents(1:3,ii)
+
+        if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+           if (abs(rij_vec(1)) > 0.5*dxbound) rij_vec(1) = rij_vec(1) - dxbound*SIGN(1.0,rij_vec(1))
+           if (abs(rij_vec(2)) > 0.5*dybound) rij_vec(2) = rij_vec(2) - dybound*SIGN(1.0,rij_vec(2))
+           if (abs(rij_vec(3)) > 0.5*dzbound) rij_vec(3) = rij_vec(3) - dzbound*SIGN(1.0,rij_vec(3))
+        endif
+
+        rij2 = dot_product(rij_vec,rij_vec)
+        qij2 = rij2*h1*h1
+
+        grkernkid = 0.
+        if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wkid,grkernkid)
+
+        error_kids = error_kids + grkernkid*cnormk/13.
+
+      enddo
+
+      error = error + (grkernparent - error_kids)**2
+    enddo
+  enddo
+
+end subroutine calculate_RL_error
+
+!----------------------------------------------------------------
+!+
+! Testing routine that splits everything and minimises global error
+! according to Daniel's research notes (his Eq 17)
+!+
+!----------------------------------------------------------------
+subroutine split_it_all_Price(npart,xyzh,vxyzu)
+  use kernel, only:grkern,radkern2,get_kernel,cnormk
+  use boundary, only: dxbound,dybound,dzbound
+  use part,     only: periodic,massoftype,igas,isplit,iactive,iphase
+  use part,     only: npartoftype,isdead_or_accreted,rhoh,gradh
+  integer, intent(inout) :: npart
+  real, intent(inout)    :: xyzh(:,:),vxyzu(:,:)
+  real, allocatable      :: shifts(:,:),omega_kids(:),sum_parents(:,:)
+  real     :: parents(1:4,1:npart),gradh_parents(npart),mkid,mparent,rij_vec(3),rij2
+  real     :: h1a,h1b,qij2a,qij2b,grkerna,grkernb,sum_kids(3)
+  real     :: grkernap,grkernbp,omegaa,omegab,omegaap,omegabp,rhoa,rhob,rhoap,rhobp
+  real     :: x_a(3),rij_unit(3),maxshift,qij2,sum
+  integer  :: nkids,nparents,add_npart,ii,jj,kk
+
+
+  ! Initialise
+  nkids = npart*13
+  nparents = npart
+  add_npart = 0
+  mkid = massoftype(isplit)
+  mparent = massoftype(igas)
+
+  ! Store the parents separately for later calculations
+  parents(1:4,1:npart) = xyzh(1:4,1:npart)
+  gradh_parents(1:npart) = gradh(1,1:npart)
+
+  ! Make *proposed* splits
+  allocate(shifts(3,nkids),omega_kids(nkids),sum_parents(3,nkids))
+
+  sum_parents = 0.
+  do ii = 1,npart
+    if (iactive(iphase(ii)) .and. .not.isdead_or_accreted(xyzh(4,ii))) then
+
+      ! used for the parent sum below
+      h1a = 1./parents(4,ii)
+      omegaap = 1./gradh_parents(ii)
+      rhoap = rhoh(xyzh(4,ii),mparent)
+
+      ! now make the children from the parent
+      call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)  ! nchild = 12
+
+      ! calculate the contribution to the parents sum for each new child
+      ! Here I have *incorrectly* assumed that the parental contribution for each
+      ! of its children is the same. This should be changed to interpolate the
+      ! parent properties for any off-centre children (probably why the resulting sum is so small!)
+      do jj = 1,npart
+          if (jj == ii) cycle
+          h1b = 1./parents(4,jj)
+          omegabp = 1./gradh_parents(jj)
+          rhobp = rhoh(xyzh(4,jj),mparent)
+
+          rij_vec = parents(1:3,jj) - xyzh(1:3,ii)
+
+          if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+            if (abs(rij_vec(1)) > 0.5*dxbound) rij_vec(1) = rij_vec(1) - dxbound*SIGN(1.0,rij_vec(1))
+            if (abs(rij_vec(2)) > 0.5*dybound) rij_vec(2) = rij_vec(2) - dybound*SIGN(1.0,rij_vec(2))
+            if (abs(rij_vec(3)) > 0.5*dzbound) rij_vec(3) = rij_vec(3) - dzbound*SIGN(1.0,rij_vec(3))
+          endif
+          rij2 = dot_product(rij_vec,rij_vec)
+          rij_unit = rij_vec/sqrt(rij2)
+
+          qij2a = rij2*h1a*h1a
+          grkernap = 0.
+          if (qij2a < radkern2) grkernap = grkern(qij2a,sqrt(qij2a))*cnormk
+
+          qij2b = rij2*h1b*h1b
+          grkernbp = 0.
+          if (qij2b < radkern2) grkernbp = grkern(qij2b,sqrt(qij2b))*cnormk
+
+          sum_parents(:,ii) = sum_parents(:,ii) + (grkernap*rij_unit/(omegaap*rhoap)) &
+                                                + (grkernbp*rij_unit/(omegabp*rhobp))
+      enddo
+
+      ! save for the other associated children
+      do kk = npart+add_npart,npart+add_npart+nchild
+        sum_parents(:,kk) = sum_parents(:,ii)
+      enddo
+
+      ! add on the new particles
+      add_npart = add_npart + nchild
+    endif
+  enddo
+
+  sum_parents = mparent*sum_parents
+
+  npart = npart + add_npart
+
+  ! I think we need to calculate the omega terms on the proposed kids,
+  ! because this has not yet been calculated on them (just inherited by parents, which will not be accurate)
+  do ii = 1,nkids
+    h1a = xyzh(4,ii)
+    rhoa = rhoh(xyzh(4,ii),mkid)
+    sum = 0.
+
+    do jj = 1,nkids
+      h1b = 1./xyzh(4,jj)
+      rij_vec = xyzh(1:3,jj) - xyzh(1:3,ii)
+
+      if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+        if (abs(rij_vec(1)) > 0.5*dxbound) rij_vec(1) = rij_vec(1) - dxbound*SIGN(1.0,rij_vec(1))
+        if (abs(rij_vec(2)) > 0.5*dybound) rij_vec(2) = rij_vec(2) - dybound*SIGN(1.0,rij_vec(2))
+        if (abs(rij_vec(3)) > 0.5*dzbound) rij_vec(3) = rij_vec(3) - dzbound*SIGN(1.0,rij_vec(3))
+      endif
+      rij2 = dot_product(rij_vec,rij_vec)
+      if (ii==jj) then
+        qij2 = 0.
+      else
+        rij_unit = rij_vec/sqrt(rij2)
+        qij2 = rij2*h1a*h1a
+      endif
+
+      grkerna = 0.
+      if (qij2 < radkern2) grkerna = grkern(qij2,sqrt(qij2))*cnormk
+
+      sum = sum + grkerna
+    enddo
+
+    omega_kids(ii) = 1. + 3.*mkid*sum/(h1a*rhoa)
+
+  enddo
+
+  ! for each new child work out the proposed shift
+  do ii = 1,nkids
+    x_a = xyzh(1:3,ii)
+    h1a = xyzh(4,ii)
+    omegaa = omega_kids(ii)
+    rhoa = rhoh(xyzh(4,ii),mkid)
+
+    ! Sum over kids only
+    sum_kids = 0.
+    do jj = 1,nkids
+      h1b = 1./xyzh(4,jj)
+      omegab = omega_kids(jj)
+      rhob = rhoh(xyzh(4,jj),mkid)
+
+      rij_vec = xyzh(1:3,jj) - xyzh(1:3,ii)
+
+      if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+        if (abs(rij_vec(1)) > 0.5*dxbound) rij_vec(1) = rij_vec(1) - dxbound*SIGN(1.0,rij_vec(1))
+        if (abs(rij_vec(2)) > 0.5*dybound) rij_vec(2) = rij_vec(2) - dybound*SIGN(1.0,rij_vec(2))
+        if (abs(rij_vec(3)) > 0.5*dzbound) rij_vec(3) = rij_vec(3) - dzbound*SIGN(1.0,rij_vec(3))
+      endif
+      rij2 = dot_product(rij_vec,rij_vec)
+
+      if (ii==jj) then
+        qij2a = 0.
+        qij2b = 0.
+        rij_unit = 0.
+      else
+        rij_unit = rij_vec/sqrt(rij2)
+
+        qij2a = rij2*h1a*h1a
+        grkerna = 0.
+
+        qij2b = rij2*h1b*h1b
+        grkernb = 0.
+      endif
+
+      if (qij2a < radkern2) grkerna = grkern(qij2a,sqrt(qij2a))*cnormk
+      if (qij2b < radkern2) grkernb = grkern(qij2b,sqrt(qij2b))*cnormk
+
+      sum_kids = sum_kids + (grkerna*rij_unit/(omegaa*rhoa)) &
+                          + (grkernb*rij_unit/(omegab*rhob))
+
+    enddo
+    sum_kids = sum_kids*mkid
+
+    ! Combine the sums
+    shifts(:,ii) = -0.5*xyzh(4,ii)**2 * (sum_kids - sum_parents(:,ii))
+
+    !if (modulo(ii,13) == 3) print*,'shifts',shifts(:,ii)
+  enddo
+!  read*
+
+  maxshift = maxval(abs(shifts))
+  if (maxshift > 0.5) print*,'WARNING SHIFTS ARE LARGE',maxshift
+
+  ! Apply the shifts
+  xyzh(1:3,1:npart) = xyzh(1:3,1:npart) + shifts(:,1:npart)
+
+! Tidy up
+deallocate(shifts,omega_kids,sum_parents)
+
+end subroutine split_it_all_Price
 
 !----------------------------------------------------------------
 !+

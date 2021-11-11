@@ -147,6 +147,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
   orbit = 0.2 !0.25*2.*3.1415926535*5.**1.5
 
   if (time > 1.*orbit .and. time < 2.*orbit .and. npartoftype(isplit)==0) call split_it_all(npart,xyzh,vxyzu)
+  print*,'finished the first split'
 
   if (time > 2.*orbit .and. time < 3.*orbit .and. npartoftype(igas)==0) call merge_it_all(npart,xyzh,vxyzu)
 
@@ -264,7 +265,7 @@ subroutine split_it_all(npart,xyzh,vxyzu)
   use physcon,     only:pi
   use splitmergeutils, only:shift_particles_WVT
   use part,        only:set_particle_type,igas,npartoftype,isplit
-  use part,        only:iactive,iphase,isdead_or_accreted
+  use part,        only:iactive,iphase,isdead_or_accreted,massoftype
   use timestep,    only:dt
   real, intent(inout) :: xyzh(:,:),vxyzu(:,:)
   integer, intent(inout) :: npart
@@ -272,30 +273,27 @@ subroutine split_it_all(npart,xyzh,vxyzu)
   real, allocatable, dimension(:,:) :: kids_ref,shifts
   integer :: ii
   integer :: nshifts,nkids,test_ind,add_npart
-  real :: err_a,err_b,err_c,err_d,error_p
+  real :: err_a,err_b,err_c,err_d
   real :: mu,test(4),mu_test(4),tol
   logical :: minimum_found
   character(len=40) :: shuffle_type,error_metric_type
 
-  ! Things to choose
-  shuffle_type = 'WVT'                ! Vacondio or WVT
-  error_metric_type = 'Reyes-Lopez'  ! Reyes-Lopez or FeldmanBonet
+  ! Things to choose - shuffle type
+  ! Options: Vacondio, WVT, None
+  shuffle_type = 'Vacondio'
+
+  ! Things to choose - error evaluation type
+  ! Options: FeldmanBonet, Reyes-Lopez, None
+  error_metric_type = 'FeldmanBonet'
 
   ! Initialise
   nkids = npart*13
   add_npart = 0
   tol = 0.01 !1% between errors
 
-  ! Store the parents separately, evaluate their error
-  parents(:,1:npart) = xyzh(:,1:npart)
-  if (error_metric_type == 'FeldmanBonet') then
-    call calculate_parent_error(npart,parents,error_p) ! only because we're doing all of them
-  else
-    error_p = 0. !to prevent compiler warnings
-  endif
-
   ! Make *proposed* splits
   allocate(kids_ref(4,nkids),shifts(3,nkids))
+  parents(:,1:npart) = xyzh(:,1:npart)
 
   do ii = 1,npart
     if (iactive(iphase(ii)) .and. .not.isdead_or_accreted(xyzh(4,ii))) then
@@ -303,8 +301,15 @@ subroutine split_it_all(npart,xyzh,vxyzu)
       add_npart = add_npart + nchild
     endif
   enddo
+  print*,'completed first splits'
 
   kids_ref = xyzh(1:4,1:nkids)
+  ! Initialise
+  err_a = 0.
+  err_b = 0.
+  err_c = 0.
+  err_d = 0.
+  mu_test = 0.
 
   ! Shuffle kids till error reduced
   ! Here we use the Golden Ratio method for rapid testing,
@@ -321,42 +326,44 @@ subroutine split_it_all(npart,xyzh,vxyzu)
     nshifts = 10
     mu_test(1) = 0.0
     call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(1))
-  else
+  elseif (shuffle_type == 'Vacondio') then
     mu_test(1) = 0.
     call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(1),shifts)
     xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
   endif
+  print*,'left bound'
 
   if (error_metric_type == 'Reyes-Lopez') then
     call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_a)
-  else
-    call calculate_global_error(nkids,npart,xyzh,parents,err_a)
-    err_a = error_p - err_a
+  elseif (error_metric_type == 'FeldmanBonet') then
+    call calculate_FB_error(nkids,npart,xyzh,parents,massoftype(isplit),massoftype(igas),err_a)
   endif
+  print*,'left bound error'
 
   ! Reset for next step
   xyzh(1:4,1:nkids) = kids_ref
 
   if (shuffle_type == 'WVT') then
-    mu_test(4) = 0.13 ! this comes from Daniel's PDF, should be limited by Courant condition carefully
+    mu_test(4) = 0.2 ! this comes from Daniel's PDF, should be limited by Courant condition carefully
     call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(4))
-  else
+  elseif (shuffle_type == 'Vacondio') then
     mu_test(4) = 10.
     call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(4),shifts)
     xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
   endif
+  print*,'right bound'
 
   if (error_metric_type == 'Reyes-Lopez') then
     call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_d)
-  else
-    call calculate_global_error(nkids,npart,xyzh,parents,err_d)
-    err_d = error_p - err_d
+  elseif (error_metric_type == 'FeldmanBonet') then
+    call calculate_FB_error(nkids,npart,xyzh,parents,massoftype(isplit),massoftype(igas),err_d)
   endif
+  print*,'right bound error'
 
   ! Reset for next step
   xyzh(1:4,1:nkids) = kids_ref
 
-  print*,'  mu/beta                   error'
+  print*,'  mu OR beta                error'
   print*,mu_test(1),err_a
   print*,mu_test(4),err_d
 
@@ -373,16 +380,15 @@ subroutine split_it_all(npart,xyzh,vxyzu)
      ! Do each one
      if (shuffle_type == 'WVT') then
        call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(2))
-     else
+     elseif (shuffle_type == 'Vacondio') then
        call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(2),shifts)
        xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
      endif
 
      if (error_metric_type == 'Reyes-Lopez') then
        call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_b)
-     else
-       call calculate_global_error(nkids,npart,xyzh,parents,err_b)
-       err_b = error_p - err_b
+     elseif (error_metric_type == 'FeldmanBonet') then
+       call calculate_FB_error(nkids,npart,xyzh,parents,massoftype(isplit),massoftype(igas),err_b)
      endif
 
      ! Reset for next
@@ -390,16 +396,15 @@ subroutine split_it_all(npart,xyzh,vxyzu)
 
      if (shuffle_type == 'WVT') then
        call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu_test(3))
-     else
+     elseif (shuffle_type == 'Vacondio') then
        call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu_test(3),shifts)
        xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
      endif
 
      if (error_metric_type == 'Reyes-Lopez') then
        call calculate_RL_error(npart,parents,nkids,xyzh(1:4,1:nkids),err_c)
-     else
-       call calculate_global_error(nkids,npart,xyzh,parents,err_c)
-       err_c = error_p - err_c
+     elseif (error_metric_type == 'FeldmanBonet') then
+       call calculate_FB_error(nkids,npart,xyzh,parents,massoftype(isplit),massoftype(igas),err_c)
      endif
 
      ! Reset for next
@@ -433,7 +438,7 @@ subroutine split_it_all(npart,xyzh,vxyzu)
    ! Override parents with the new, shuffled children
    if (shuffle_type == 'WVT') then
      call WVT_loop(nshifts,nkids,xyzh,xyzh(4,1:nkids),mu)
-   else
+   elseif (shuffle_type == 'Vacondio') then
      call shift_particles_Vacondio(nkids,xyzh(1:4,1:nkids),vxyzu(:,1:nkids),dt,mu,shifts)
      xyzh(1:3,1:nkids) = kids_ref(1:3,1:nkids) - shifts
    endif
@@ -450,7 +455,7 @@ end subroutine split_it_all
 !+
 !----------------------------------------------------------------
 subroutine merge_it_all(npart,xyzh,vxyzu)
-  use part, only:shuffle_part,npartoftype,igas,isplit,iactive,iphase,isdead_or_accreted
+  use part, only:shuffle_part,npartoftype,igas,isplit,iactive,iphase,isdead_or_accreted,massoftype
   use timestep, only:dt
   integer, intent(inout) :: npart
   real, intent(inout)    :: xyzh(:,:), vxyzu(:,:)
@@ -459,13 +464,12 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
   integer :: k,i,nkids,nshifts,test_ind
   logical :: make_ghost,minimum_found
   real :: err_a,err_b,err_c,err_d
-  real :: err_parent_a,err_parent_d,err_parent_b,err_parent_c
   real :: mu,test(4),mu_test(4),tol
   character(len=40) :: shuffle_type,error_metric_type
 
-  ! Things to choose
-  shuffle_type = 'WVT'                ! Vacondio or WVT
-  error_metric_type = 'FeldmanBonet'  ! Reyes-Lopez or FeldmanBonet
+  ! Things to choose: options are as in the splitting section
+  shuffle_type = 'Vacondio'
+  error_metric_type = 'FeldmanBonet'
 
   make_ghost = .true. ! this is currently overridden for testing
   tol = 0.01 !1% difference in error
@@ -503,9 +507,9 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
 
   if (shuffle_type == 'WVT') then
     nshifts = 10
-    mu_test(1) = 0.0
+    mu_test(1) = 0.02
     call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:npart),mu_test(1))
-  else
+  elseif (shuffle_type == 'Vacondio') then
     mu_test(1) = 0.
     call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(1),shifts)
     xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
@@ -513,10 +517,9 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
 
   if (error_metric_type == 'Reyes-Lopez') then
     call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_a)
-  else
-    call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_a)
-    call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_a)
-    err_a = err_parent_a - err_a
+  elseif (error_metric_type == 'FeldmanBonet') then
+    !call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_a)
+    call calculate_FB_error(npart,nkids,xyzh,xyzh_split(1:4,1:nkids),massoftype(igas),massoftype(isplit),err_a)
   endif
 
   ! Reset for next
@@ -524,9 +527,9 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
 
   if (shuffle_type == 'WVT') then
     nshifts = 10
-    mu_test(4) = 0.13 ! this comes from Daniel's PDF, should be limited by Courant condition carefully
+    mu_test(4) = 0.2 ! this comes from Daniel's PDF, should be limited by Courant condition carefully
     call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:nkids),mu_test(4))
-  else
+  elseif (shuffle_type == 'Vacondio') then
     mu_test(4) = 10.
     call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(4),shifts)
     xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
@@ -534,10 +537,9 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
 
   if (error_metric_type == 'Reyes-Lopez') then
     call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_d)
-  else
-    call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_d)
-    call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_d)
-    err_d = err_parent_d - err_d
+  elseif (error_metric_type == 'FeldmanBonet') then
+    !call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_d)
+    call calculate_FB_error(npart,nkids,xyzh,xyzh_split(1:4,1:nkids),massoftype(igas),massoftype(isplit),err_d)
   endif
 
   ! Reset for next
@@ -560,17 +562,16 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
      ! Do each one
      if (shuffle_type == 'WVT') then
        call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:nkids),mu_test(2))
-     else
+     elseif (shuffle_type == 'Vacondio') then
        call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(2),shifts)
        xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
      endif
 
      if (error_metric_type == 'Reyes-Lopez') then
        call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_b)
-     else
-       call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_b)
-       call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_b)
-       err_b = err_parent_b - err_b
+     elseif (error_metric_type == 'FeldmanBonet') then
+       !call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_b)
+       call calculate_FB_error(npart,nkids,xyzh,xyzh_split(1:4,1:nkids),massoftype(igas),massoftype(isplit),err_b)
      endif
 
      ! Reset for next
@@ -578,17 +579,16 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
 
      if (shuffle_type == 'WVT') then
        call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:nkids),mu_test(3))
-     else
+     elseif (shuffle_type == 'Vacondio') then
        call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu_test(3),shifts)
        xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
      endif
 
      if (error_metric_type == 'Reyes-Lopez') then
        call calculate_RL_error(npart,xyzh,nkids,xyzh_split(:,1:nkids),err_c)
-     else
-       call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_c)
-       call calculate_global_error(nkids,npart,xyzh_split(:,1:nkids),xyzh,err_c)
-       err_c = err_parent_c - err_c
+     elseif (error_metric_type == 'FeldmanBonet') then
+       !call calculate_parent_error(npart,xyzh(:,1:npart),err_parent_c)
+       call calculate_FB_error(npart,nkids,xyzh,xyzh_split(1:4,1:nkids),massoftype(igas),massoftype(isplit),err_c)
      endif
 
      ! Reset for next
@@ -612,11 +612,9 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
      if (test(1) < test(3) .or. test(2)< test(3)) then
        mu_test(4) = mu_test(3)
        err_d = err_c
-       err_parent_d = err_parent_c
      else
        mu_test(1) = mu_test(2)
        err_a = err_b
-       err_parent_a = err_parent_b
      endif
    enddo
    print*,'I think I am done, here is the new mu value:',mu,'and error',test(test_ind)
@@ -624,7 +622,7 @@ subroutine merge_it_all(npart,xyzh,vxyzu)
   ! Keep final answer
   if (shuffle_type == 'WVT') then
     call WVT_loop(nshifts,npart,xyzh,xyzh(4,1:npart),mu)
-  else
+  elseif (shuffle_type == 'Vacondio') then
     call shift_particles_Vacondio(npart,xyzh(1:4,1:npart),vxyzu(:,1:npart),dt,mu,shifts)
     xyzh(1:3,1:npart) = parents_ref(1:3,1:npart) - shifts
   endif
@@ -666,32 +664,32 @@ end subroutine merge_it_all
 
 !----------------------------------------------------------------
 !+
-! Testing: evaluate error of kids
+! Testing: Calculate the Feldman & Bonet global error
 !+
 !----------------------------------------------------------------
- subroutine calculate_global_error(nkids,nparents,kids,parents,error)
+ subroutine calculate_FB_error(nmove,nstill,move,still,mmove,mstill,globalerror)
    use boundary, only: dxbound,dybound,dzbound
-   use part,     only: periodic,massoftype,isplit
+   use part,     only: periodic,isplit,igas
    use kernel, only:get_kernel,cnormk,radkern,radkern2
-   real, intent(in)    :: kids(:,:),parents(:,:)
-   integer, intent(in) :: nparents,nkids
-   real, intent(out)   :: error
+   real, intent(in)    :: move(:,:),still(:,:),mstill,mmove
+   integer, intent(in) :: nstill,nmove
+   real, intent(out)   :: globalerror
    integer :: ii,jj
-   real    :: x_p(3),rij(3),rij2,wchild,grkernchild,h1,h31,mchild,qij2
+   real    :: x_p(3),rij(3),rij2,wmove,grkernmove,h1,h31,qij2,error
 
-   error = 0.
-   mchild = massoftype(isplit)
+   globalerror = 0.
 
-   do ii = 1,nparents
-     ! reference parent location
-     x_p = parents(1:3,ii)
+   do ii = 1,nstill
+     ! reference original particle location
+     x_p = still(1:3,ii)
+     error = 0.
 
-     ! now check across all children
-     do jj = 1,nkids
-       h1 = 1./kids(4,jj)
+     ! now check across all particles that will be shuffled
+     do jj = 1,nmove
+       h1 = 1./move(4,jj)
        h31 = h1**3
 
-       rij = x_p - kids(1:3,jj)
+       rij = x_p - move(1:3,jj)
        if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
@@ -701,86 +699,41 @@ end subroutine merge_it_all
        rij2 = dot_product(rij,rij)
        qij2 = rij2*h1*h1
 
-       wchild = 0.
-       if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wchild,grkernchild)
+       wmove = 0.
+       if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wmove,grkernmove)
 
-       ! Add the error
-       error = error + (mchild*wchild*cnormk*h31)
+       ! Add the children error
+       error = error + (mmove*wmove*cnormk*h31)
 
      enddo
+     ! Now calculate the total error
+     globalerror = globalerror + (mstill - error)**2
    enddo
 
- end subroutine calculate_global_error
-
- !----------------------------------------------------------------
- !+
- ! Testing: evaluate error of parents
- !+
- !----------------------------------------------------------------
-  subroutine calculate_parent_error(npart,parents,error)
-    use boundary, only: dxbound,dybound,dzbound
-    use part,     only: periodic,massoftype,igas
-    use kernel, only:get_kernel,cnormk,radkern,radkern2
-    real, intent(in)    :: parents(:,:)
-    integer, intent(in) :: npart
-    real, intent(out)   :: error
-    integer :: ii,jj
-    real    :: x_p(3),rij(3),rij2,wchild,grkernchild,h1,h31,mchild,qij2
-
-    error = 0.
-    mchild = massoftype(igas)
-
-    do ii = 1,npart
-      ! reference parent location
-      x_p = parents(1:3,ii)
-
-      ! now check across all parents
-      do jj = 1,npart
-        h1 = 1./parents(4,jj)
-        h31 = h1**3
-
-        rij = x_p - parents(1:3,jj)
-        if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
-           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
-           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
-           if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
-        endif
-
-        rij2 = dot_product(rij,rij)
-        qij2 = rij2*h1*h1
-
-        wchild = 0.
-        if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wchild,grkernchild)
-
-        ! Add the error
-        error = error + (mchild*wchild*cnormk*h31)
-
-      enddo
-    enddo
-
-  end subroutine calculate_parent_error
+ end subroutine calculate_FB_error
 
 !----------------------------------------------------------------
 !+
-!  Calculates error in the derivative according to Reyes López et al. 2012
+!  Calculates global error in the derivative according to Reyes López et al. 2012
 !+
 !----------------------------------------------------------------
 
 subroutine calculate_RL_error(nparents,parents,nkids,kids,error)
   use kernel, only:get_kernel,cnormk,radkern2
   use boundary, only: dxbound,dybound,dzbound
-  use part,     only: periodic
+  use part,     only: periodic,igas,isplit,massoftype
   integer, intent(in) :: nparents,nkids
   real, intent(in)    :: parents(:,:),kids(:,:)
   real, intent(out)   :: error
   integer :: ii,jj,kk
   real    :: wkid,grkernkid,wparent,grkernparent,error_kids
-  real    :: h1,rij_vec(3),rij2,qij2
+  real    :: h1,rij_vec(3),rij2,qij2,lambda
 
   ! There are about 10 trillion ways to do this faster, let's do the slow way
   ! for testing
 
   error = 0.
+  lambda = massoftype(igas)/massoftype(isplit)
 
   ! Use location of parents to evaluate error
   do ii = 1,1
@@ -826,7 +779,7 @@ subroutine calculate_RL_error(nparents,parents,nkids,kids,error)
 
       enddo
 
-      error = error + (grkernparent - error_kids)**2
+      error = error + (grkernparent - lambda*error_kids)**2
     enddo
   enddo
 
@@ -834,11 +787,11 @@ end subroutine calculate_RL_error
 
 !----------------------------------------------------------------
 !+
-! Testing routine that splits everything and minimises global error
+! Testing routine that shuffles to minimise global error
 ! according to Daniel's research notes (his Eq 17)
 !+
 !----------------------------------------------------------------
-subroutine split_it_all_Price(npart,xyzh,vxyzu)
+subroutine shift_particles_Price(npart,xyzh,vxyzu)
   use kernel, only:grkern,radkern2,get_kernel,cnormk
   use boundary, only: dxbound,dybound,dzbound
   use part,     only: periodic,massoftype,igas,isplit,iactive,iphase
@@ -864,7 +817,7 @@ subroutine split_it_all_Price(npart,xyzh,vxyzu)
   parents(1:4,1:npart) = xyzh(1:4,1:npart)
   gradh_parents(1:npart) = gradh(1,1:npart)
 
-  ! Make *proposed* splits
+  ! Make space for *proposed* splits
   allocate(shifts(3,nkids),omega_kids(nkids),sum_parents(3,nkids))
 
   sum_parents = 0.
@@ -1021,7 +974,7 @@ subroutine split_it_all_Price(npart,xyzh,vxyzu)
 ! Tidy up
 deallocate(shifts,omega_kids,sum_parents)
 
-end subroutine split_it_all_Price
+end subroutine shift_particles_Price
 
 !----------------------------------------------------------------
 !+

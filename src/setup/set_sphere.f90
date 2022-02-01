@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------!
 ! The Phantom Smoothed Particle Hydrodynamics code, by Daniel Price et al. !
-! Copyright (c) 2007-2021 The Authors (see AUTHORS)                        !
+! Copyright (c) 2007-2022 The Authors (see AUTHORS)                        !
 ! See LICENCE file for usage and distribution conditions                   !
 ! http://phantomsph.bitbucket.io/                                          !
 !--------------------------------------------------------------------------!
@@ -17,11 +17,12 @@ module spherical
 !
 ! :Dependencies: physcon, random, stretchmap, unifdis
 !
- use unifdis, only:set_unifdis,mask_prototype,mask_true
- use physcon, only:pi
+ use unifdis,    only:set_unifdis,mask_prototype,mask_true
+ use physcon,    only:pi
+ use stretchmap, only:rho_func
  implicit none
 
- public  :: set_sphere,set_ellipse
+ public  :: set_sphere,set_ellipse,rho_func
 
  integer, parameter :: &
    ierr_notinrange    = 1, &
@@ -53,14 +54,14 @@ contains
 !-----------------------------------------------------------------------
 subroutine set_sphere(lattice,id,master,rmin,rmax,delta,hfact,np,xyzh, &
                       rhofunc,rhotab,rtab,xyz_origin,nptot,dir,exactN,np_requested,mask)
- use stretchmap, only:set_density_profile
+ use stretchmap, only:set_density_profile,rho_func
  character(len=*), intent(in)    :: lattice
  integer,          intent(in)    :: id,master
  integer,          intent(inout) :: np
  real,             intent(in)    :: rmin,rmax,hfact
  real,             intent(out)   :: xyzh(:,:)
  real,             intent(inout) :: delta
- real,             external,      optional :: rhofunc
+ procedure(rho_func), pointer, optional :: rhofunc
  real,             intent(in),    optional :: rhotab(:), rtab(:)
  integer,          intent(in),    optional :: dir
  integer,          intent(in),    optional :: np_requested
@@ -177,7 +178,7 @@ subroutine set_sphere_mc(id,master,rmin,rmax,hfact,np_requested,np,xyzh, &
     !
     ! invert to get mass coordinate from radial coordinate, i.e. r(m)
     !
-    rr = mr**(1./3.)*rmax ! uniform density
+    rr = (rmin**3+mr*(rmax**3-rmin**3))**(1./3.) ! uniform density
     !
     ! get a random position on sphere
     !

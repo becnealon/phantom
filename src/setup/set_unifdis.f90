@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------!
 ! The Phantom Smoothed Particle Hydrodynamics code, by Daniel Price et al. !
-! Copyright (c) 2007-2021 The Authors (see AUTHORS)                        !
+! Copyright (c) 2007-2022 The Authors (see AUTHORS)                        !
 ! See LICENCE file for usage and distribution conditions                   !
 ! http://phantomsph.bitbucket.io/                                          !
 !--------------------------------------------------------------------------!
@@ -16,6 +16,7 @@ module unifdis
 !
 ! :Dependencies: random, stretchmap
 !
+ use stretchmap, only:rho_func
  implicit none
  public :: set_unifdis, get_ny_nz_closepacked, get_xyzmin_xyzmax_exact
  public :: is_valid_lattice, is_closepacked
@@ -28,7 +29,7 @@ module unifdis
   end function mask_prototype
  end interface
 
- public :: mask_prototype, mask_true
+ public :: mask_prototype, mask_true, rho_func
 
  private
 
@@ -63,7 +64,7 @@ subroutine set_unifdis(lattice,id,master,xmin,xmax,ymin,ymax, &
  real,             intent(in),    optional :: rellipsoid(3)
  integer(kind=8),  intent(inout), optional :: nptot
  integer,          intent(in),    optional :: npy,npz,dir,geom
- real, external,                  optional :: rhofunc
+ procedure(rho_func), pointer,    optional :: rhofunc
  integer,          intent(in),    optional :: inputiseed
  logical,          intent(in),    optional :: verbose,centre,in_ellipsoid
  integer,          intent(out),   optional :: err
@@ -72,7 +73,7 @@ subroutine set_unifdis(lattice,id,master,xmin,xmax,ymin,ymax, &
 
  integer            :: i,j,k,l,m,nx,ny,nz,npnew,npin,ierr
  integer            :: jy,jz,ipart,maxp,iseed,icoord,igeom
- integer(kind=8)    :: iparttot
+ integer(kind=8)    :: iparttot,iparttot0
  real               :: delx,dely
  real               :: deltax,deltay,deltaz,dxbound,dybound,dzbound
  real               :: xstart,ystart,zstart,xi,yi,zi,rcyl2,rr2
@@ -143,6 +144,7 @@ subroutine set_unifdis(lattice,id,master,xmin,xmax,ymin,ymax, &
  else
     iparttot = 0
  endif
+ iparttot0 = iparttot
 
  ! Suppress output to the terminal if wished - handy for setups which call this subroutine frequently
  is_verbose = .true.
@@ -520,7 +522,7 @@ subroutine set_unifdis(lattice,id,master,xmin,xmax,ymin,ymax, &
     nz = nint(dzbound/delta)
     npnew = nx*ny*nz
 
-    do while (iparttot < np+npnew)
+    do while (iparttot < iparttot0+npnew)
        xi = xmin + ran2(iseed)*dxbound
        yi = ymin + ran2(iseed)*dybound
        zi = zmin + ran2(iseed)*dzbound

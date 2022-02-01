@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------!
 ! The Phantom Smoothed Particle Hydrodynamics code, by Daniel Price et al. !
-! Copyright (c) 2007-2021 The Authors (see AUTHORS)                        !
+! Copyright (c) 2007-2022 The Authors (see AUTHORS)                        !
 ! See LICENCE file for usage and distribution conditions                   !
 ! http://phantomsph.bitbucket.io/                                          !
 !--------------------------------------------------------------------------!
@@ -68,7 +68,7 @@ module kdtree
     integer :: npnode
     real    :: xmin(ndimtree)
     real    :: xmax(ndimtree)
- end type
+ end type kdbuildstack
 
  private
 
@@ -536,6 +536,7 @@ subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, 
  il = 0
  nl = 0
  nr = 0
+ wassplit = .false.
  if ((.not. present(groupsize)) .and. (npnode  <  1)) return ! node has no particles, just quit
 
  r2max = 0.

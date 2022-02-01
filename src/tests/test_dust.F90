@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------!
 ! The Phantom Smoothed Particle Hydrodynamics code, by Daniel Price et al. !
-! Copyright (c) 2007-2021 The Authors (see AUTHORS)                        !
+! Copyright (c) 2007-2022 The Authors (see AUTHORS)                        !
 ! See LICENCE file for usage and distribution conditions                   !
 ! http://phantomsph.bitbucket.io/                                          !
 !--------------------------------------------------------------------------!
@@ -679,6 +679,7 @@ subroutine test_epsteinstokes(ntests,npass)
     nfailed = 0
     errmax = 0.
     tol = 6.3e-2
+    ts1 = 0.
     do i=1,npts
        grainsizei = smin*10**((i-1)*ds)/udist
        !--no need to test drag transition 'ndusttypes' times...once is enough

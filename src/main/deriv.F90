@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------!
 ! The Phantom Smoothed Particle Hydrodynamics code, by Daniel Price et al. !
-! Copyright (c) 2007-2021 The Authors (see AUTHORS)                        !
+! Copyright (c) 2007-2022 The Authors (see AUTHORS)                        !
 ! See LICENCE file for usage and distribution conditions                   !
 ! http://phantomsph.bitbucket.io/                                          !
 !--------------------------------------------------------------------------!
@@ -38,13 +38,13 @@ contains
 subroutine derivs(icall,npart,nactive,xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,&
                   Bevol,dBevol,rad,drad,radprop,dustprop,ddustprop,&
                   dustevol,ddustevol,dustfrac,eos_vars,time,dt,dtnew,pxyzu,dens,metrics)
- use dim,            only:maxvxyzu
+ use dim,            only:maxvxyzu,mhd,fast_divcurlB
  use io,             only:iprint,fatal
  use linklist,       only:set_linklist
  use densityforce,   only:densityiterate
  use ptmass,         only:ipart_rhomax
  use externalforces, only:externalforce
- use part,           only:dustgasprop,gamma_chem,dvdx,Bxyz
+ use part,           only:dustgasprop,gamma_chem,dvdx,Bxyz,set_boundaries_to_active
 #ifdef IND_TIMESTEPS
  use timestep_ind,   only:nbinmax
 #else
@@ -149,6 +149,14 @@ subroutine derivs(icall,npart,nactive,xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,&
  if (icall==1) then
     call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,&
                         stressmax,fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+    if (.not. fast_divcurlB) then
+       ! Repeat the call to calculate all the non-density-related quantities in densityiterate.
+       ! This needs to be separate for an accurate calculation of divcurlB which requires an up-to-date rho.
+       ! if fast_divcurlB = .false., then all additional quantities are calculated during the previous call
+       call densityiterate(3,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,&
+                           stressmax,fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+    endif
+    set_boundaries_to_active = .false.     ! boundary particles are no longer treated as active
     call do_timing('dens',tlast,tcpulast)
  endif
 
@@ -179,7 +187,7 @@ subroutine derivs(icall,npart,nactive,xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,&
 
 #ifdef SINK_RADIATION
  !compute dust temperature
- if (maxvxyzu >= 4) call get_dust_temperature_from_ptmass(npart,xyzh,nptmass,xyzmh_ptmass,dust_temp)
+ call get_dust_temperature_from_ptmass(npart,xyzh,vxyzu,nptmass,xyzmh_ptmass,dust_temp)
 #endif
 !
 ! set new timestep from Courant/forces condition

@@ -1600,7 +1600,7 @@ subroutine store_results(icall,cell,getdv,getdb,realviscosity,stressmax,xyzh,&
           ! so that rho times dustfrac gives dust density
           !
           dustfrac(:,lli) = 0.
-          if (iamgasi or iamspliti) then
+          if (iamgasi .or. iamspliti) then
              do l=1,ndustlarge
                 rhodusti(l) = cnormk*massoftype(idust+l-1)*(rhosum(irhodusti+l-1))*hi31
                 dustfrac(ndustsmall+l,lli) = rhodusti(l)*rho1i ! dust-to-gas ratio

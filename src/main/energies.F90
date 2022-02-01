@@ -766,10 +766,6 @@ subroutine compute_energies(t)
     ev_data(iev_sum,iev_gws(8)) = hp(4)
  endif
 
- if (maxp==maxp_hard) then
-    ev_data(iev_sum,iev_mass) = ev_data(iev_sum,iev_mass) + mtot
- endif
-
  return
 end subroutine compute_energies
 !----------------------------------------------------------------

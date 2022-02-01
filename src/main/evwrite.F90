@@ -115,9 +115,6 @@ subroutine init_evfile(iunit,evfile,open_file)
  if (dtmax_dratio > 0.) then
     call fill_ev_tag(ev_fmt,iev_dtx, 'dtmax',    '0', i,j)
  endif
- if (maxp==maxp_hard) then
-    call fill_ev_tag(ev_fmt,iev_mass,'mass',     '0', i,j)
- endif
  call fill_ev_tag(ev_fmt,iev_entrop, 'totentrop','s', i,j)
  call fill_ev_tag(ev_fmt,iev_rmsmach,'rmsmach',  '0', i,j)
  call fill_ev_tag(ev_fmt,iev_vrms,   'vrms',     '0', i,j)

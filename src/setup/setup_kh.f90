@@ -23,10 +23,10 @@ module setup
 
  private
  !--Hard-coded input parameters
- real, parameter :: rho1   =  1.   ! density  of medium 1
- real, parameter :: rho2   =  2.   ! density  of medium 2
- real            :: v1     = -0.5  ! velocity of medium 1
- real            :: v2     =  0.5  ! velocity of medium 2
+ real, parameter :: rho1   =  1.5   ! density  of medium 1
+ real, parameter :: rho2   =  1.5   ! density  of medium 2
+ real            :: v1     =  0.0  ! velocity of medium 1
+ real            :: v2     =  0.0  ! velocity of medium 2
  real            :: przero =  2.5  ! initial constant pressure
  real            :: xsize  =  1.0  ! size of the box in the x-direction
  real            :: ysize  =  1.0  ! size of the box in the y-direction

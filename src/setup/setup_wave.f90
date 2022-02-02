@@ -66,12 +66,13 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
 !
 ! default options
 !
+
  npartx  = 64
  ntypes  = 1
  rhozero = 1.
  massfac = 1.
  cs      = 1.
- ampl    = 1.d-4
+ ampl    = 0.05
  use_dustfrac = .false.
  if (id==master) then
     itype = 1

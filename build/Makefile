@@ -657,9 +657,10 @@ ifeq ($(SETUP), wave)
 #   linear wave
     PERIODIC=yes
     SETUPFILE= setup_wave.f90
+    SPLITTING=yes
     KNOWN_SETUP=yes
     IND_TIMESTEPS=no
-    KERNEL=quintic
+    KERNEL=cubic
 endif
 
 ifeq ($(SETUP), wavedamp)
@@ -1792,9 +1793,9 @@ SOURCES= physcon.f90 ${CONFIG} ${SRCKERNEL} io.F90 units.f90 boundary.f90 \
          partinject.F90 utils_inject.f90 utils_filenames.f90 utils_summary.F90 ${SRCCHEM}\
          ${SRCDUST} dust_formation.F90 ptmass_radiation.F90 \
          mpi_dens.F90 mpi_force.F90 stack.F90 mpi_derivs.F90 kdtree.F90 linklist_kdtree.F90 ${SRCTURB} \
-         ${SRCPHOTO} ${SRCINJECT} ${SRCKROME} ${SRCSPLIT} memory.F90 ${SRCREADWRITE_DUMPS}  \
+         ${SRCPHOTO} ${SRCINJECT} ${SRCKROME}  memory.F90 ${SRCREADWRITE_DUMPS}  \
          quitdump.f90 ptmass.F90 \
-         readwrite_infile.F90 dens.F90 force.F90 utils_deriv.f90 deriv.F90 energies.F90 sort_particles.F90 \
+         dens.F90 ${SRCSPLIT} readwrite_infile.F90 force.F90 utils_deriv.f90 deriv.F90 energies.F90 sort_particles.F90 \
          evwrite.F90 step_leapfrog.F90 writeheader.F90 ${SRCAN} step_supertimestep.F90 mf_write.f90 evolve.F90 \
          checksetup.F90 initial.F90
 

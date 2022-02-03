@@ -35,7 +35,7 @@ module splitmergeutils
 !--------------------------------------------------------------------------
 subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,ires,ichildren)
  use icosahedron, only:pixel2vector,compute_corners,compute_matrices
- use part,        only:copy_particle_all,igas,isplit,set_particle_type,kill_particle,iphase
+ use part,        only:copy_particle_all,igas,isplit,set_particle_type,kill_particle
  use random,      only:ran2
  use physcon,     only:pi
  use vectorutils, only:rotatevec

@@ -100,7 +100,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  npart = 0
  npart_total = 0
  density_func => rhofunc
- call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
+ call set_unifdis('random',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
                   deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
                   rhofunc=density_func,dir=2,mask=i_belong)
 

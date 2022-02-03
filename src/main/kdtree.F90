@@ -1074,7 +1074,7 @@ end subroutine special_sort_particles_in_cell
 !+
 !  Takes in the current xpivot, checks to see if it needs
 !  to be shifted to give a particular number of particles on
-!  either side. Currently seeks multiples of 13 on each.
+!  either side. Currently seeks multiples of nchild on each.
 !  NB: this can definitely be incorporated into the above routine
 !  in a cleverer + faster way
 !+
@@ -1087,7 +1087,7 @@ subroutine slide_xpivot(xpivot,iaxis,npnode,i1,xyzh_soa,xmaxi,xmini,xyzcofm,imin
  integer, intent(in)  :: npnode,i1,imin,imax
  real :: dpivot(npnode),extra_dist,xpivot_new
  logical :: slide_left, slide_right,finished,on_pivot
- integer :: rhs,lhs,i,rem_rhs,rem_lhs,ii,kk,extra,iaxis_new,count,mm
+ integer :: rhs,lhs,i,rem_rhs,rem_lhs,ii,kk,extra,iaxis_new,count,mm,nchild
 
  finished = .false.
  xpivot_new = xpivot
@@ -1095,8 +1095,9 @@ subroutine slide_xpivot(xpivot,iaxis,npnode,i1,xyzh_soa,xmaxi,xmini,xyzcofm,imin
  count = 0
  on_pivot = .false.
 
- ! Check a number divisible by 13 is given
- if (modulo((npnode),13)> 0) then
+ ! Check a number divisible by nchild is given
+ nchild = 13
+ if (modulo((npnode),nchild)> 0) then
    print*,npnode,'not divisible by (nchild+1 put into slide_xpivot)'
    print*,'cannot expect this routine to work!'
    !stop
@@ -1115,16 +1116,16 @@ sliding: do while (.not.finished)
    enddo
 
    ! work out if we should move the pivot to get an even split
-   rem_rhs = modulo(rhs,13)
-   rem_lhs = modulo(lhs,13)
+   rem_rhs = modulo(rhs,nchild)
+   rem_lhs = modulo(lhs,nchild)
    if (rem_rhs <= rem_lhs) slide_right = .true.
    if (rem_lhs < rem_rhs) slide_left = .true.
 
-   ! override the above to force minimum in cell of 13
-   if (lhs < 13) then
+   ! override the above to force minimum in cell of nchild
+   if (lhs < nchild) then
      slide_right = .true.
      slide_left = .false.
-   elseif (rhs < 13) then
+   elseif (rhs < nchild) then
      slide_left = .true.
      slide_right = .false.
    endif
@@ -1178,7 +1179,7 @@ sliding: do while (.not.finished)
      if (slide_right) xpivot_new = xpivot_new - epsilon(xpivot_new)
    endif
 
-    if (modulo(rhs,13) > 0 .or. modulo(lhs,13) > 0) then
+    if (modulo(rhs,nchild) > 0 .or. modulo(lhs,nchild) > 0) then
      ! this occurs if particles happen to lie on the plane of the pivot
      ! pick the next biggest axis to cut across
       iaxis_new = maxloc(xmaxi - xmini,1,(xmaxi - xmini) < (xmaxi(iaxis_new) - xmini(iaxis_new)))

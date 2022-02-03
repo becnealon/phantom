@@ -137,7 +137,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  logical, intent(inout) :: need_to_relax
  integer                :: i,k,add_npart,oldsplits,oldreals
  logical                :: split_it,ghost_it,already_split,rln
- logical                :: make_ghost,send_to_list,do_price
+ logical                :: make_ghost,send_to_list,do_price,do_Whitworth
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
  real :: orbit
@@ -160,6 +160,11 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  ! tolerance per shuffle manually.
 
  do_price = .false.
+ do_Whitworth = .false.
+ if ((do_price .and. do_Whitworth)) then
+   print*,'Gotta pick only one'
+   stop
+ endif
  split_shuffle_type = 'WVT'
  split_error_metric_type = 'FeldmanBonet'
  merge_shuffle_type = 'WVT'
@@ -178,6 +183,8 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
   if (time > 1.*orbit .and. time < 2.*orbit .and. npartoftype(isplit)==0) then
     if (do_price) then
       call split_it_all_Price(npart,xyzh,vxyzu)
+    elseif (do_Whitworth) then
+      call shift_particles_Whitworth(npart,xyzh,vxyzu)
     else
       call split_it_all(npart,xyzh,vxyzu,split_shuffle_type,split_error_metric_type)
     split_counter = 0
@@ -331,7 +338,7 @@ subroutine split_it_all(npart,xyzh,vxyzu,split_shuffle_type,split_error_metric_t
   print*,'Splitting using ',trim(split_shuffle_type),' and ',trim(split_error_metric_type)
 
   ! Initialise
-  nkids = npart*13
+  nkids = npart*nchild_in
   add_npart = 0
   tol = 0.01 !1% between errors
 
@@ -517,7 +524,7 @@ subroutine split_it_all_reshuffle(npart,xyzh,vxyzu,split_shuffle_type,split_erro
   logical :: minimum_found
 
   ! Initialise
-  nkids = nparents_saved*13
+  nkids = nparents_saved*nchild_in
   add_npart = 0
   tol = 0.01 !1% between errors
 
@@ -1011,6 +1018,142 @@ end subroutine merge_it_all_reshuffle
 
 !----------------------------------------------------------------
 !+
+! Seemingly simple shuffling procedure from Eq 10 of
+! Whitworth, Bhattal, Turner and Watkins 95
+!+
+!----------------------------------------------------------------
+ subroutine shift_particles_Whitworth(npart,xyzh,vxyzu)
+   use boundary, only: dxbound,dybound,dzbound
+   use part,     only: periodic,rhoh,massoftype,igas,isplit,npartoftype
+   use part,     only: iactive,iphase,isdead_or_accreted,gradh,radprop,dvdx
+   use part,     only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind,rad
+   use densityforce, only:densityiterate
+   use kernel, only:get_kernel,cnormk,radkern2
+   integer, intent(inout) :: npart
+   real, intent(inout) :: xyzh(:,:),vxyzu(:,:)
+   real, allocatable, dimension(:,:) :: parents,kids,shifts
+   integer :: ii,jj,nshifts,nkids,nparents,add_npart,kk
+   real    :: ri(3),h1,h41,rij(3),rij2,qij2,wmove,grkernmove,rhoi
+   real    :: rij_unit(3),epsilon,maxshift(3),rhoj(3),mkid,mparent,stressmax
+
+   ! Initialise
+   nkids = npart*nchild_in
+   nparents = npart
+   add_npart = 0
+   mkid = massoftype(isplit)
+   mparent = massoftype(igas)
+
+   ! Store the parents separately for later calculations
+   allocate(parents(4,nparents),kids(4,nkids),shifts(3,nkids))
+   parents(1:4,1:nparents) = xyzh(1:4,1:npart)
+
+   ! Create the proposed kids
+   do ii = 1,npart
+     if (iactive(iphase(ii)) .and. .not.isdead_or_accreted(xyzh(4,ii))) then
+
+       ! Split the parent
+       call split_a_particle(nchild,ii,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)
+
+       ! add on the new particles
+       add_npart = add_npart + nchild
+
+     endif
+   enddo
+   npart = npart + add_npart
+
+
+   ! Initialise for shuffling
+   nshifts = 100
+   epsilon = 1.0
+
+   do kk = 1,nshifts
+     ! Get the right smoothing lengths for the kids
+     call densityiterate(2,nkids,nkids,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
+                             fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+
+     ! Ready for next set of shifts
+     shifts = 0.
+     kids(1:4,1:nkids) = xyzh(1:4,1:npart)
+
+     ! For each child, calculate the true density at that location using the parent distribution
+     do ii = 1,nkids
+       rhoi = 0.
+       ri = kids(1:3,ii)
+
+       do jj = 1,nparents
+         h1 = 1./parents(4,jj)
+
+         rij = ri - parents(1:3,jj)
+
+         if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+           if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+         endif
+
+         rij2 = dot_product(rij,rij)
+         qij2 = rij2*h1*h1
+
+         wmove = 0.
+         if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wmove,grkernmove)
+
+         rhoi = rhoi + wmove*cnormk
+
+       enddo
+
+       ! Subsequently, calculate shifts according to Eq 10
+       do jj=1,nparents
+         rhoj = rhoh(parents(4,jj),mparent)
+         h1 = 1./parents(4,jj)
+         h41 = h1**4
+
+         rij = ri - parents(1:3,jj)
+
+         if (periodic) then  ! Should make this a pre-processor statement since this can be expensive if we're not using periodic BC's
+           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+           if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+           if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+         endif
+
+         rij2 = dot_product(rij,rij)
+         if (abs(rij2) < tiny(rij2)) then !The child can be at the same location as the parent
+           rij_unit = 0.
+         else
+           rij_unit = rij/sqrt(rij2)
+         endif
+         qij2 = rij2*h1*h1
+
+         wmove = 0.
+         if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wmove,grkernmove)
+
+         shifts(:,ii) = shifts(:,ii) + (rhoj - rhoi)/rhoj * wmove*cnormk*rij_unit
+
+       enddo
+
+       ! Finalise the shifts
+       shifts(:,ii) = shifts(:,ii) * kids(4,ii) * epsilon
+     enddo
+
+     maxshift(1) = sum(abs(shifts(1,:)))/real(nkids)
+     maxshift(2) = sum(abs(shifts(2,:)))/real(nkids)
+     maxshift(3) = sum(abs(shifts(3,:)))/real(nkids)
+     print*,kk,'maxshifts',maxshift
+
+     ! Apply those shifts
+     xyzh(1:3,1:nkids) = xyzh(1:3,1:nkids) + shifts(:,1:nkids)
+
+   enddo
+
+   ! Tidy up
+   call densityiterate(2,nkids,nkids,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
+                           fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+   deallocate(parents,kids)
+
+ end subroutine shift_particles_Whitworth
+
+
+!----------------------------------------------------------------
+!+
 ! Testing: WVT loop
 !+
 !----------------------------------------------------------------
@@ -1152,7 +1295,7 @@ subroutine calculate_RL_error(nparents,parents,nkids,kids,error)
         grkernkid = 0.
         if (qij2 < radkern2) call get_kernel(qij2,sqrt(qij2),wkid,grkernkid)
 
-        error_kids = error_kids + grkernkid*cnormk/13.
+        error_kids = error_kids + grkernkid*cnormk/real(nchild_in)
 
       enddo
 
@@ -1187,7 +1330,7 @@ subroutine split_it_all_Price(npart,xyzh,vxyzu)
 
 
   ! Initialise
-  nkids = npart*13
+  nkids = npart*nchild_in
   nparents = npart
   add_npart = 0
   mkid = massoftype(isplit)

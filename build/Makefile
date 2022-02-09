@@ -678,6 +678,15 @@ ifeq ($(SETUP), wavedamp)
     DEBUG=no
 endif
 
+ifeq ($(SETUP), splitwave)
+#   linear wave
+    SPLITTING=yes
+    PERIODIC=yes
+    SETUPFILE= setup_wave.f90
+    KNOWN_SETUP=yes
+    IND_TIMESTEPS=no
+endif
+
 ifeq ($(SETUP), sedov)
 #   Sedov blast wave test
     PERIODIC=yes
@@ -1313,6 +1322,7 @@ endif
 
 ifeq ($(SYSTEM), gfortranOSX)  # for use with mac gfortran (5.3.0, 7.3.0 tested)
     include Makefile_defaults_gfortran
+    FFLAGS= -L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib
 endif
 
 ifeq ($(SYSTEM), gfortran44)
@@ -1795,7 +1805,8 @@ SOURCES= physcon.f90 ${CONFIG} ${SRCKERNEL} io.F90 units.f90 boundary.f90 \
          mpi_dens.F90 mpi_force.F90 stack.F90 mpi_derivs.F90 kdtree.F90 linklist_kdtree.F90 ${SRCTURB} \
          ${SRCPHOTO} ${SRCINJECT} ${SRCKROME}  memory.F90 ${SRCREADWRITE_DUMPS}  \
          quitdump.f90 ptmass.F90 \
-         dens.F90 ${SRCSPLIT} readwrite_infile.F90 force.F90 utils_deriv.f90 deriv.F90 energies.F90 sort_particles.F90 \
+         dens.F90 ${SRCSPLIT} readwrite_infile.F90 force.F90 utils_shuffleparticles.F90 utils_deriv.f90 deriv.F90 \
+         energies.F90 sort_particles.F90 \
          evwrite.F90 step_leapfrog.F90 writeheader.F90 ${SRCAN} step_supertimestep.F90 mf_write.f90 evolve.F90 \
          checksetup.F90 initial.F90
 

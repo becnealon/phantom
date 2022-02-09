@@ -72,12 +72,19 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  rhozero = 1.
  massfac = 1.
  cs      = 1.
- ampl    = 0.05
+ ampl    = 1.d-4
+ xmini   = -0.5
+ xmaxi   = 0.5
+
+ npartx = 8
+ ampl   = 0.05
+
  use_dustfrac = .false.
  if (id==master) then
     itype = 1
     print "(/,a,/)",'  >>> Setting up particles for linear wave test <<<'
     call prompt(' enter number of '//trim(labeltype(itype))//' particles in x ',npartx,8,int(maxp/144.))
+    call prompt(' enter box size: max x: ',xmaxi)
     if (use_dust) then
        dust_method = 2
        dtg = 1.
@@ -99,18 +106,17 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
     endif
  endif
  call bcast_mpi(npartx)
+ xmini = -xmaxi
 !
 ! boundaries
 !
- xmini = -0.5
- xmaxi = 0.5
  length = xmaxi - xmini
  deltax = length/npartx
  ! try to give y boundary that is a multiple of 6 particle spacings in the low density part
  fac = 6.*(int((1.-epsilon(0.))*radkern/6.) + 1)
  deltay = fac*deltax*sqrt(0.75)
  deltaz = fac*deltax*sqrt(6.)/3.
- call set_boundary(xmin,xmax,-deltay,deltay,-deltaz,deltaz)
+ call set_boundary(xmini,xmaxi,-deltay,deltay,-deltaz,deltaz)
 !
 ! general parameters
 !

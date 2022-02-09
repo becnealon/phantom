@@ -28,6 +28,7 @@ module split
 
  private
 
+ logical :: all_split ! for testing purposes only
  integer, parameter, public  :: nchild = 12
  integer, parameter :: nchild_in = nchild + 1
  integer, save      :: children_list(nchild_in) = 0
@@ -63,6 +64,13 @@ subroutine init_split(ierr)
  split_counter = 0
  merge_counter = 0
 
+
+ if ((Hubber_eqn94 .and. DJP_eqn17) .or. (DJP_eqn17 .and. DJP_eqn13) .or. (DJP_eqn13 .and. Hubber_eqn94) ) then
+    print*, 'Too many incompatible options.  Set one to false and try again'
+    stop
+ endif
+
+all_split = .false.
 ierr = 0
 
 ! particles must be checked if they are to be split, merged, ghosted or some combination
@@ -129,15 +137,16 @@ end subroutine init_split
 !+
 !----------------------------------------------------------------
 subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
- use io,   only: fatal
- use part, only:kill_particle,isdead_or_accreted,shuffle_part,iactive,periodic
+ use io,       only:fatal
+ use part,     only:kill_particle,isdead_or_accreted,shuffle_part,iactive,periodic, &
+                    rhoh,massoftype,igas,isplit,rhoh,gradh
  use timestep, only:time
  integer, intent(inout) :: npart,npartoftype(:)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
  logical, intent(inout) :: need_to_relax
  integer                :: i,k,add_npart,oldsplits,oldreals
  logical                :: split_it,ghost_it,already_split,rln
- logical                :: make_ghost,send_to_list,do_price,do_Whitworth
+ logical                :: make_ghost,send_to_list,kill_me,kill_me_now,do_price,do_Whitworth
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
  real :: orbit
@@ -145,10 +154,11 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  character(len=40) :: split_shuffle_type,split_error_metric_type
  character(len=40) :: merge_shuffle_type,merge_error_metric_type
 
- rln = .true.
+ rln = .false.
  need_to_relax = .false.
  oldsplits = npartoftype(isplit)
  oldreals = npartoftype(igas)
+ kill_me_now = .false.
 
  ! Method options:
  ! 1. Run with Daniel's Eq 17 for splitting. Nothing yet implemented for merging.
@@ -223,7 +233,55 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
   endif
 
   return !for testing with the whole box being split/merged, we don't need the rest of this routine
-endif
+ else
+  ! Reset the boundaries depending on time
+  oldsplits = npartoftype(isplit)
+  oldreals = npartoftype(igas)
+  gzw = 0.
+  kill_me = .false.
+  if (.true.) then
+    if ((                  time < 0.2) .or. &
+        (0.4 <= time .and. time < 0.6) .or. &
+        (0.8 <= time .and. time < 1.0) .or. &
+        (1.2 <= time .and. time < 1.4) .or. &
+        (1.6 <= time .and. time < 1.8) ) then
+        splitbox(:) = 0.
+        if (all_split .and. (DJP_eqn13 .or. DJP_eqn17 .or. Hubber_eqn94)) then
+           all_split = .false.
+           !print*, 'calculating density gradient of unsplit particles'
+           !call calc_gradrho(npart,xyzh)
+           xyzh_parent(1:4,1:npart) = xyzh(1:4,1:npart)
+           xyzh_parent(  5,1:npart) = gradh(1,1:npart)
+           n_parent = npart
+           pmass_parent = massoftype(isplit)
+        endif
+    else
+       !kill_me = .true.
+       splitbox(1) =  1.75
+       splitbox(2) =  1.75
+       splitbox(3) = -1.75
+       splitbox(4) = -1.75
+       if (.not. all_split .and. (DJP_eqn13 .or. DJP_eqn17 .or. Hubber_eqn94)) then
+         do i = 1,npart
+             write(100,*) xyzh(1:3,i),rhoh(xyzh(4,i),massoftype(igas))
+          enddo
+          all_split = .true.
+          !print*, 'calculating density gradient of split particles'
+          !call calc_gradrho(npart,xyzh)
+          xyzh_parent(1:4,1:npart) = xyzh(1:4,1:npart)
+          xyzh_parent(  5,1:npart) = gradh(1,1:npart)
+          n_parent = npart
+          pmass_parent = massoftype(igas)
+       endif
+    endif
+  endif
+  if (npartoftype(isplit) /= oldsplits) need_to_relax = .true.
+  if (kill_me) then
+    do i = 1,npart
+      write(700,*)i,xyzh(1:4,i),rhoh(xyzh(4,i),massoftype(igas)),massoftype(igas)
+    enddo
+   endif
+ endif
 
  if (rand_type /= 5) then
     call fatal('update_splitting','this routine is set up only for rand_type==5')
@@ -251,6 +309,8 @@ endif
    endif
  enddo split_em
  npart = npart + add_npart
+ if (add_npart > 0) kill_me_now = .true.
+
  call shuffle_part(npart)
 
  ! Now go through and collect anything that should go into set_linklist call
@@ -295,6 +355,7 @@ endif
  enddo merge_em
 
  npart = npart + add_npart
+ if (add_npart > 0) kill_me_now = .true.
 
  print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
  if (k > nchild_in) call merge_particles(npart,k,xyzh,xyzh_split(:,1:k),ioriginal,npartoftype,make_ghost)
@@ -307,6 +368,13 @@ endif
  if (npartoftype(igas) /= oldreals .or. npartoftype(isplit) /= oldsplits) need_to_relax = .true.
 
  if (periodic) call shift_for_periodicity(npart,xyzh)
+
+ if (kill_me) then
+    do i = 1,npart
+       write(710,*)i,xyzh(1:4,i),rhoh(xyzh(4,i),massoftype(isplit)),massoftype(isplit)
+    enddo
+    if (kill_me_now) stop
+ endif
 
 end subroutine update_splitting
 
@@ -1162,8 +1230,9 @@ end subroutine merge_it_all_reshuffle
    real, intent(inout) :: xyzh_in(:,:),h0(:)
    real, intent(in)    :: mu
    integer, intent(in) :: n_in,nshifts
-   real :: dmu,mu_here
+   real :: dmu,mu_here,scoef
    integer :: ii
+   logical :: keep_on_shifting
 
    dmu = real(mu/(nshifts+1))
    mu_here = mu
@@ -1172,7 +1241,7 @@ end subroutine merge_it_all_reshuffle
      do ii = 1,nshifts
 
        ! calculate the shifts according to the WVT method
-       call shift_particles_WVT(n_in,xyzh_in,h0,mu_here)
+       call shift_particles_WVT(n_in,xyzh_in,h0,mu_here,scoef,keep_on_shifting)
 
        ! decrease mu for next go around
        mu_here = mu_here - dmu
@@ -1694,11 +1763,11 @@ subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftyp
     ! centroid is outside split region -> merge splits to make a real
     ! centroid is outside split *and* inside ghost, do both
     k = ioriginal(inodeparts(jmin))
-  !  hack to take into account periodic boundaries
-    if ((xyzh(1,k) > xmax)) xyzh(1,k) = xyzh(1,k) - dxbound
-    if ((xyzh(1,k) < xmin)) xyzh(1,k) = xyzh(1,k) + dxbound
-    if ((xyzh(2,k) > ymax)) xyzh(2,k) = xyzh(2,k) - dybound
-    if ((xyzh(2,k) < ymin)) xyzh(2,k) = xyzh(2,k) + dybound
+    !  account periodic boundaries
+    if (xyzh(1,k) > xmax) xyzh(1,k) = xyzh(1,k) - dxbound
+    if (xyzh(1,k) < xmin) xyzh(1,k) = xyzh(1,k) + dxbound
+    if (xyzh(2,k) > ymax) xyzh(2,k) = xyzh(2,k) - dybound
+    if (xyzh(2,k) < ymin) xyzh(2,k) = xyzh(2,k) + dybound
 
     call inside_ghost_zone(xyzh(1:3,k),ghost_it)
     call inside_boundary(xyzh(1:3,k),split_it)

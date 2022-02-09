@@ -37,7 +37,7 @@ module energies
                                iev_alpha,iev_B,iev_divB,iev_hdivB,iev_beta,iev_temp,iev_etao,iev_etah(2),&
                                iev_etaa,iev_vel,iev_vhall,iev_vion,iev_n(7),&
                                iev_dtg,iev_ts,iev_dm(maxdusttypes),iev_momall,iev_angall,iev_maccsink(2),&
-                               iev_macc,iev_eacc,iev_totlum,iev_erot(4),iev_viscrat,iev_gws(8)
+                               iev_macc,iev_eacc,iev_totlum,iev_erot(4),iev_viscrat,iev_gws(8),iev_mass
  integer,         public    :: iev_erad
  real,            public    :: erad
  integer,         parameter :: inumev  = 150  ! maximum number of quantities to be printed in .ev
@@ -186,7 +186,7 @@ subroutine compute_energies(t)
 !$omp shared(iev_B,iev_divB,iev_hdivB,iev_beta,iev_temp,iev_etao,iev_etah) &
 !$omp shared(iev_etaa,iev_vel,iev_vhall,iev_vion,iev_n) &
 !$omp shared(iev_dtg,iev_ts,iev_macc,iev_totlum,iev_erot,iev_viscrat) &
-!$omp shared(eos_vars,grainsize,graindens,ndustsmall) &
+!$omp shared(eos_vars,grainsize,graindens,ndustsmall,fxyzu) &
 #ifdef KROME
 !$omp shared(gamma_chem) &
 #endif
@@ -764,6 +764,10 @@ subroutine compute_energies(t)
     ev_data(iev_sum,iev_gws(6)) = hp(3)
     ev_data(iev_sum,iev_gws(7)) = hx(4)
     ev_data(iev_sum,iev_gws(8)) = hp(4)
+ endif
+
+ if (maxp==maxp_hard) then
+    ev_data(iev_sum,iev_mass) = mtot
  endif
 
  return

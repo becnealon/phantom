@@ -682,13 +682,12 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   integer, intent(in) :: npart
   character(len=*), intent(in) :: prefix
   real :: stressmax,mu,dmu,beta,xyzh_ref(4,npart),shifts(3,npart),rho_ave,pmass_child
-  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,hi14,rad2,radj
+  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,rad2
   real :: scoef,xi,yi,zi,hi,twoh2,qi2,qj2,hi12,rhoe,denom,rij2,rhoi1
   real :: err,errmax(3),errave(3),errmin(3),maggrad,magshift,dx_shift(3,npart)
   real :: signg(3),graddensity(3),runi(3),rij(3),xshift,hmin_old,hmin_new
   integer :: nshifts,i,j,ih0(maxp_hard),ishift
   character(len=40) :: shift_type
-
   logical :: converged,keep_on_shifting
 
   shift_type = 'JHW'

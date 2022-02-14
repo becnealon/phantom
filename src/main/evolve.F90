@@ -133,6 +133,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #ifdef SPLITTING
   logical        :: need_to_relax
   real           :: rho_ave
+  character(len=40) :: prefix
 #endif
  logical         :: fulldump,abortrun,at_dump_time,writedump
  logical         :: should_conserve_energy,should_conserve_momentum,should_conserve_angmom
@@ -165,6 +166,9 @@ subroutine evol(infile,logfile,evfile,dumpfile)
  else
     dtmax_log_dratio = 0.0
  endif
+#ifdef SPLITTING
+ write(prefix,'(a)') trim(evfile(1:len(trim(evfile))-3))
+#endif
 
 #ifdef IND_TIMESTEPS
  use_global_dt = .false.
@@ -268,7 +272,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
-  !if (need_to_relax) call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave)
+    if (need_to_relax) call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix)
 #endif
 
     if (gravity .and. icreate_sinks > 0 .and. ipart_rhomax /= 0) then
@@ -656,45 +660,102 @@ end subroutine print_timinginfo
 !  (this will need to be re-written into other routines)
 !+
 !----------------------------------------------------------------
-subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref)
+subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   use dim,  only: maxp_hard
-  use part, only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind
-  use part, only: gradh,rad,radprop,dvdx
+  use io,   only: fatal,iprint
+  use part, only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind,iphase
+  use part, only: gradh,rad,radprop,dvdx,massoftype,rhoh,iphase,igas,isplit
   use densityforce, only:densityiterate
   use splitmergeutils, only:shift_particles_WVT,shift_particles_Vacondio
-  use splitmergeutils, only:quick_rho
+  use splitmergeutils, only:quick_rho,hold_child_in_parent_position
+  use splitmergeutils, only:xyzgradrho,DJP_eqn17,DJP_eqn13,Hubber_eqn94
+  use splitmergeutils, only:xyzh_parent,n_parent,pmass_parent
   use timestep,        only:dt
   use timestep_ind,    only:nactive
+  use linklist,        only:set_linklist
+  use kernel,          only:cnormk,grkern,radkern2
+  use boundary,        only:xmin,dxbound,dybound,dzbound
+  use physcon,         only:pi
+  use utils_shuffleparticles, only:shuffleparticles
   real, intent(inout) :: xyzh(:,:),vxyzu(:,:),h0(:)
+  real, intent(in)    :: rho_ref,time
   integer, intent(in) :: npart
-  real, intent(in)    :: rho_ref
-  real :: stressmax,mu,dmu,beta,xyzh_ref(4,npart),shifts(3,npart),rho_ave
-  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d
-  integer :: nshifts,i
+  character(len=*), intent(in) :: prefix
+  real :: stressmax,mu,dmu,beta,xyzh_ref(4,npart),shifts(3,npart),rho_ave,pmass_child
+  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,hi14,rad2,radj
+  real :: scoef,xi,yi,zi,hi,twoh2,qi2,qj2,hi12,rhoe,denom,rij2,rhoi1
+  real :: err,errmax(3),errave(3),errmin(3),maggrad,magshift,dx_shift(3,npart)
+  real :: signg(3),graddensity(3),runi(3),rij(3),xshift,hmin_old,hmin_new
+  integer :: nshifts,i,j,ih0(maxp_hard),ishift
   character(len=40) :: shift_type
-  logical :: converged
 
-  shift_type = 'WVT'
+  logical :: converged,keep_on_shifting
+
+  shift_type = 'JHW'
   xyzh_ref(:,:) = xyzh(1:4,1:npart)
 
   if (shift_type == 'WVT') then
-    nshifts = 50
+    !nshifts = 100.
+    nshifts = 100
     mu = -0.0004
-
+    scoef = -1.
+    keep_on_shifting = .true.
     dmu = real(mu/(nshifts+1))
 
-    do i = 1,nshifts
+
+    if (hold_child_in_parent_position) then
+       h0  = 0.
+       ih0 = 0
+       do i = 1,npart
+          if (iphase(i) > 0) then
+             xi = xyzh(1,i)
+             yi = xyzh(2,i)
+             zi = xyzh(3,i)
+             hi = xyzh(4,i)
+             twoh2 = (4.703*hi)**2 ! 2.*hi*nchild**(1/3)
+             do j = 1,npart
+                if (iphase(j) < 0) then
+                   rad2 = (xi-xyzh(1,j))**2 + (yi-xyzh(2,j))**2 + (zi-xyzh(3,j))**2
+                   if (rad2 < twoh2) then
+                      h0(i)  = h0(i)  + xyzh(4,j)
+                      ih0(i) = ih0(i) + 1
+                   endif
+                endif
+             enddo
+             if (ih0(i) > 0) then
+                h0(i) = h0(i)/ih0(i)
+                write(63,*)i,ih0(i),h0(i),xyzh(4,i),h0(i)/xyzh(4,i)
+             else
+                call fatal('relax_by_shuffling','dividing by zero')
+             endif
+          else
+             h0(i)  = xyzh(4,i)
+          endif
+       enddo
+    endif
+    i = 0
+    do while (i < nshifts .and. keep_on_shifting)
+      i = i + 1
       ! calculate the new smoothing length
-      !call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
-      !                        fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+      if (DJP_eqn17 .or. DJP_eqn17 .or. Hubber_eqn94 .or. .true.) then
+         call set_linklist(npart,nactive,xyzh,vxyzu)
+         call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
+                                 fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+      endif
 
       ! calculate the shifts according to the WVT method
-      call shift_particles_WVT(npart,xyzh,h0,mu)
+      call shift_particles_WVT(npart,xyzh,h0,mu,scoef,keep_on_shifting)
 
       ! decrease mu for next go around
       mu = mu - dmu
       print*,'ran through shifts. mu = ',mu,' for iteration i = ',i
     enddo
+    if (DJP_eqn17 .or. DJP_eqn13 .or. Hubber_eqn94) then
+       call set_linklist(npart,nactive,xyzh,vxyzu)
+       call densityiterate(2,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
+                              fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+    endif
+
   elseif (shift_type == 'Vacondio') then
 
     ! Testing: iterate using the Golden Ratio method to find the best beta value
@@ -754,8 +815,46 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref)
   xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
 
   print*,'shifted by Vacondio method, new rho_ave',rho_ave
+
+
+  elseif (shift_type == 'JHW') then
+
+     ! calculate hmin_old
+     hmin_old = huge(hmin_old)
+     do i = 1,n_parent
+        hmin_old = min(hmin_old,xyzh_parent(4,i))
+     enddo
+
+     if (abs(massoftype(igas) - pmass_parent) < epsilon(pmass_parent)) then
+        pmass_child = massoftype(isplit)
+     else
+        pmass_child = massoftype(igas)
+     endif
+     !print*,'masses:', massoftype(igas), massoftype(isplit),pmass_child,pmass_parent
+     call shuffleparticles(iprint,npart,xyzh,pmass_child, &
+                            xyzh_parent=xyzh_parent,pmass_parent=pmass_parent,n_parent=n_parent,prefix=prefix)
+
+     ! calculate hmin_new
+     hmin_new = huge(hmin_new)
+     do i = 1,npart
+        hmin_new = min(hmin_new,xyzh(4,i))
+     enddo
+     ! update timestep
+     if (hmin_new < hmin_old) then
+        print*, dt,dt*0.1*hmin_new/hmin_old
+        dt = dt*hmin_new/hmin_old
+     endif
   else
     print*,'No shift done, check shift type'
+  endif
+
+
+
+  ! Since global timestepping, reset all particles to active
+  if (hold_child_in_parent_position) then
+     do i = 1,npart
+        iphase(i) = abs(iphase(i))
+     enddo
   endif
 
 end subroutine relax_by_shuffling

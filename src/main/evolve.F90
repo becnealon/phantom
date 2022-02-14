@@ -669,10 +669,10 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref)
   integer, intent(in) :: npart
   real, intent(in)    :: rho_ref
   real :: stressmax,mu,dmu,beta,xyzh_ref(4,npart),shifts(3,npart),rho_ave
-  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d
+  real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,scoef
   integer :: nshifts,i
   character(len=40) :: shift_type
-  logical :: converged
+  logical :: converged, keep_on_shifting
 
   shift_type = 'WVT'
   xyzh_ref(:,:) = xyzh(1:4,1:npart)
@@ -689,7 +689,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref)
       !                        fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
 
       ! calculate the shifts according to the WVT method
-      call shift_particles_WVT(npart,xyzh,h0,mu)
+      call shift_particles_WVT(npart,xyzh,h0,mu,scoef,keep_on_shifting)
 
       ! decrease mu for next go around
       mu = mu - dmu

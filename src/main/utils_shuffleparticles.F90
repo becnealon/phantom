@@ -31,7 +31,7 @@ module utils_shuffleparticles
  integer, parameter :: ipart    = 3
  ! additional parameters
  integer, parameter :: maxcellcache = 50000
- integer            :: ncall        =     1  ! to track the number of calls to this subroutine for debugging 
+ integer            :: ncall        =     1  ! to track the number of calls to this subroutine for debugging
  logical            :: firstcall    = .true. ! logical to control debugging print statements
  private
 
@@ -58,7 +58,7 @@ contains
 !     xyzh_parent:  array containing the position of the parent particles
 !     pmass_parent: mass of the parent particle
 !     n_parent:     number of parent particles
-! 
+!
 !-------------------------------------------------------------------
 subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab,rtab,dtab,dcontrast, &
                             xyzh_parent,pmass_parent,n_parent,is_setup,prefix)
@@ -87,16 +87,17 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
- real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard)
+ real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard),FBsum,FBerr
  real,save    :: xyzcache(maxcellcache,4)
  real,save    :: xyzcache_parent(maxcellcache,4)
- logical      :: shuffle,at_interface,use_parent_h
+ logical      :: shuffle,at_interface,use_parent_h,use_metric
  character(len=128) :: prefix0,fmt1,fmt2,fmt3
  !$omp threadprivate(xyzcache,xyzcache_parent,listneigh)
 
  !--Initialise free parameters
  idebug       =    1 ! 0 = off; 1=print initial & final distribution + errors; 2=print every step; 3=print every step with gradients
  nshiftmax    =  200 ! maximum number of shuffles/iterations
+ use_metric   = .true. ! use an error metric?
  !--Initialise remaining parameters
  rnine        =    0.
  rtwelve      =    0.
@@ -114,6 +115,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        open(unit=333,file=trim(prefix0)//'shuffling_partposition.dat')
        open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat')
        open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat')
+       open(unit=336,file=trim(prefix0)//'shuffling_error_metrics.dat')
        do j = 334,335
           write(j,"('#',13(1x,'[',i2.2,1x,a11,']',2x))") &
              1,'ishift',&
@@ -130,12 +132,16 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
             12,'stddev_grho', &
             13,'ncall'
        enddo
+       write(j,"('#',2(1x,'[',i2.2,1x,a11,']',2x))") &
+       1,'ishift', &
+       2,'FBerr'
        firstcall = .false.
     else
        open(unit=332,file=trim(prefix0)//'shuffling_totalshift.dat',        position='append')
        open(unit=333,file=trim(prefix0)//'shuffling_partposition.dat',      position='append')
        open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat',         position='append')
        open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat',position='append')
+       open(unit=336,file=trim(prefix0)//'shuffling_error_metrics.dat',     position='append')
        do j = 332,335
           write(j,'(a)') ' '
        enddo
@@ -205,7 +211,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     write(iprint,*) 'Shuffling to a non-uniform sphere'
     write(iprint,*) 'This is untested without a background, so aborting until properly tested'
     return
- elseif (present(xyzh_parent) .and. present(pmass_parent) .and. present(n_parent)) then 
+ elseif (present(xyzh_parent) .and. present(pmass_parent) .and. present(n_parent)) then
     iprofile = ipart
     if (pmass > pmass_parent) then
        use_parent_h = .true.
@@ -260,7 +266,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        grrhoonrhoe_parent(:,i) = pmass_parent*grrhoonrhoe_parent(:,i)
     enddo over_pparts
 !$omp end parallel do
-#endif 
+#endif
  else
     write(iprint,'(1x,a)') 'Shuffling: Density profile undefined.  Aborting.'
     return
@@ -294,11 +300,12 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     errave   = 0.
     stddev   = 0.
     nparterr = 0
+    FBerr   = 0.
 
     ! determine how much to shift by
 !$omp parallel do default (none) &
 !$omp shared(xyzh,npart,pmass,dx_shift,gradh,rmin,rmax,iprofile,dedge,dmed,dr1,idebug) &
-!$omp shared(use_parent_h,n_parent,xyzh_parent,grrhoonrhoe_parent,totalshift) &
+!$omp shared(use_parent_h,n_parent,xyzh_parent,grrhoonrhoe_parent,totalshift,pmass_parent) &
 !$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
@@ -306,10 +313,11 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 !$omp private(i,j,k,ip,ineigh,icell,jm1,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi,rhoi1,radi,coefi) &
 !$omp private(grrhoonrhoe,grrhoonrhoi,signg,rhoe,drhoe,denom,nneigh) &
 !$omp private(err,maggradi,maggrade,magshift,at_interface) &
-!$omp private(twoh21,kernsum) & ! unique to splitting
+!$omp private(twoh21,kernsum,FBsum) & ! unique to splitting
 !$omp reduction(min: errmin) &
 !$omp reduction(max: errmax) &
-!$omp reduction(+:   errave,stddev,nparterr)
+!$omp reduction(+:   errave,stddev,nparterr,FBerr)
+
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
 
@@ -376,6 +384,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
              twoh21 = 1./(2.0*xyzh(4,i))**2
              if (xyzh(4,i) < epsilon(xyzh(4,i))) print*, 'fucking i'
              kernsum     = 0.
+             FBsum       = 0.
              over_parents: do j = 1,n_parent
                 rij(1) = xyzh_parent(1,j) - xi
                 rij(2) = xyzh_parent(2,j) - yi
@@ -392,6 +401,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 if (qi2 < radkern2) then
                    grrhoonrhoe = grrhoonrhoe - grrhoonrhoe_parent(:,j)*wkern(qi2,sqrt(qi2))
                    kernsum     = kernsum + wkern(qi2,sqrt(qi2))
+                   FBsum       = FBsum + wkern(qi2,sqrt(qi2))*cnormk*pmass_parent
                 endif
              enddo over_parents
              if (kernsum > 0.) then
@@ -440,6 +450,9 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
              if (zi*grrhoonrhoi(3) > zi*grrhoonrhoe(3)) signg(3) = -1.0
           endif
           dx_shift(:,i) = grrhoonrhoi + signg*grrhoonrhoe
+
+          ! calculate the error
+          FBerr = FBerr + (pmass - FBsum)**2
 
           ! limit the particle shift to 0.5h
           magshift  = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
@@ -527,6 +540,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                           ,errmin(2,2),errave(2,2)/nparterr,errmax(2,2) &
                           ,errmin(3,2),errave(3,2)/nparterr,errmax(3,2) &
                           ,stddev(1:2,2),ncall
+       write(336,'(I18,1x,es18.10)') ishift, FBerr
        if (idebug==2) then
           do i = 1,npart
              write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),&
@@ -567,7 +581,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),rtwelve,ncall
        enddo
     endif
-    do i = 332,335
+    do i = 332,335,336
        close(i)
     enddo
  endif

@@ -87,7 +87,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
- real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard),FBsum,FBerr
+ real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard),derrmax
  real,save    :: xyzcache(maxcellcache,4)
  real,save    :: xyzcache_parent(maxcellcache,4)
  logical      :: shuffle,at_interface,use_parent_h,use_metric
@@ -96,7 +96,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 
  !--Initialise free parameters
  idebug       =    1 ! 0 = off; 1=print initial & final distribution + errors; 2=print every step; 3=print every step with gradients
- nshiftmax    =  200 ! maximum number of shuffles/iterations
+ nshiftmax    =  600 ! maximum number of shuffles/iterations
  use_metric   = .true. ! use an error metric?
  !--Initialise remaining parameters
  rnine        =    0.
@@ -134,7 +134,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        enddo
        write(j,"('#',2(1x,'[',i2.2,1x,a11,']',2x))") &
        1,'ishift', &
-       2,'FBerr'
+       2,'maxshift'
        firstcall = .false.
     else
        open(unit=332,file=trim(prefix0)//'shuffling_totalshift.dat',        position='append')
@@ -287,6 +287,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  ishift     = 0
  shuffle    = .true.
  totalshift = 0.
+
  do while (shuffle .and. ishift < nshiftmax)
     ! update densities
     call set_linklist(npart,npart,xyzh,vxyzu)
@@ -300,23 +301,23 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     errave   = 0.
     stddev   = 0.
     nparterr = 0
-    FBerr   = 0.
+    derrmax  = tiny(derrmax)
 
     ! determine how much to shift by
 !$omp parallel do default (none) &
 !$omp shared(xyzh,npart,pmass,dx_shift,gradh,rmin,rmax,iprofile,dedge,dmed,dr1,idebug) &
 !$omp shared(use_parent_h,n_parent,xyzh_parent,grrhoonrhoe_parent,totalshift,pmass_parent) &
-!$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall) &
+!$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall,derrmax) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
 #endif
 !$omp private(i,j,k,ip,ineigh,icell,jm1,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi,rhoi1,radi,coefi) &
 !$omp private(grrhoonrhoe,grrhoonrhoi,signg,rhoe,drhoe,denom,nneigh) &
 !$omp private(err,maggradi,maggrade,magshift,at_interface) &
-!$omp private(twoh21,kernsum,FBsum) & ! unique to splitting
+!$omp private(twoh21,kernsum) & ! unique to splitting
 !$omp reduction(min: errmin) &
 !$omp reduction(max: errmax) &
-!$omp reduction(+:   errave,stddev,nparterr,FBerr)
+!$omp reduction(+:   errave,stddev,nparterr)
 
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
@@ -384,7 +385,6 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
              twoh21 = 1./(2.0*xyzh(4,i))**2
              if (xyzh(4,i) < epsilon(xyzh(4,i))) print*, 'fucking i'
              kernsum     = 0.
-             FBsum       = 0.
              over_parents: do j = 1,n_parent
                 rij(1) = xyzh_parent(1,j) - xi
                 rij(2) = xyzh_parent(2,j) - yi
@@ -401,7 +401,6 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 if (qi2 < radkern2) then
                    grrhoonrhoe = grrhoonrhoe - grrhoonrhoe_parent(:,j)*wkern(qi2,sqrt(qi2))
                    kernsum     = kernsum + wkern(qi2,sqrt(qi2))
-                   FBsum       = FBsum + wkern(qi2,sqrt(qi2))*cnormk*pmass_parent
                 endif
              enddo over_parents
              if (kernsum > 0.) then
@@ -451,11 +450,9 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           endif
           dx_shift(:,i) = grrhoonrhoi + signg*grrhoonrhoe
 
-          ! calculate the error
-          FBerr = FBerr + (pmass - FBsum)**2
-
           ! limit the particle shift to 0.5h
           magshift  = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
+          if (magshift/hi > derrmax) derrmax = magshift/hi
           if (magshift > 0.25*hi*hi) dx_shift(:,i) = 0.5*hi*dx_shift(:,i)/sqrt(magshift)
           totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
 
@@ -540,7 +537,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                           ,errmin(2,2),errave(2,2)/nparterr,errmax(2,2) &
                           ,errmin(3,2),errave(3,2)/nparterr,errmax(3,2) &
                           ,stddev(1:2,2),ncall
-       write(336,'(I18,1x,es18.10)') ishift, FBerr
+       write(336,'(I18,1x,es18.10)') ishift, derrmax
        if (idebug==2) then
           do i = 1,npart
              write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),&
@@ -550,8 +547,10 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        if (idebug/=1) write(333,*) ' '
     endif
 
-    ! Determine stopping criteria been met [DEVELOP THIS]
-    if (.false.) shuffle = .false.
+    ! Determine if particles are shuffling less than 1.E-6 of their hi
+    if (use_metric) then
+      if (derrmax < 1.E-6) shuffle = .false.
+    endif
 
     ! update counter
     ishift = ishift + 1

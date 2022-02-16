@@ -82,7 +82,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  character(len=*) , optional, intent(in)    :: prefix
  integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross
  integer,save :: listneigh(maxneigh)
- real         :: stressmax,rmin,rmax,dr,dr1,dedge,dmed
+ real         :: stressmax,max_shift_thresh,max_shift_thresh2,rmin,rmax,dr,dr1,dedge,dmed
  real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,derrmax,err
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
@@ -95,12 +95,14 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  !$omp threadprivate(xyzcache,xyzcache_parent,listneigh)
 
  !--Initialise free parameters
- idebug       =    1 ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
- nshiftmax    =  600 ! maximum number of shuffles/iterations
+ idebug           =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
+ nshiftmax        =  600  ! maximum number of shuffles/iterations
+ max_shift_thresh = 4.d-3 ! will stop shuffling once (maximum shift)/h is less than this value
  !--Initialise remaining parameters
  rnine        =    0.
  rtwelve      =    0.
  use_parent_h = .true. ! to prevent compiler warnings
+ max_shift_thresh2 = max_shift_thresh*max_shift_thresh
 
  !--Determine what has been passed in
  if (idebug > 0) then
@@ -171,51 +173,68 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     endif
     write(iprint,'(1x,a)') 'Shuffling: Shuffling to a parent array'
 #ifdef SPLITTING
+    !--Calculate grad rho / rho for the parent particles
+    call set_linklist(n_parent,n_parent,xyzh_parent(1:4,:),vxyzu)
+
     grrhoonrhoe_parent = 0.
 !$omp parallel do default (none) &
 !$omp shared(xyzh_parent,pmass_parent,grrhoonrhoe_parent,n_parent) &
+!$omp shared(inodeparts,inoderange,ifirstincell,ncells) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
 #endif
-!$omp private(i,j,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi1) &
-!$omp private(denom,gradhi,gradhj)
-    over_pparts: do i=1,n_parent
-       xi = xyzh_parent(1,i)
-       yi = xyzh_parent(2,i)
-       zi = xyzh_parent(3,i)
-       hi = xyzh_parent(4,i)
-       gradhi = xyzh_parent(5,i)
-       hi12  = 1.0/(hi*hi)
-       hi14  = hi12*hi12
-       rhoi1 = 1.0/rhoh(hi,pmass_parent)
-       ! calculate (grad rho) / rho for particle i
-       over_pneighbours: do j = 1,n_parent
-          if (i==j) cycle over_pneighbours
+!$omp private(i,j,k,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi1) &
+!$omp private(icell,ineigh,ip,nneigh,denom,gradhi,gradhj)
+    over_pcells: do icell=1,int(ncells)
+       k = ifirstincell(icell)
 
-          rij(1) = xyzh_parent(1,j) - xi
-          rij(2) = xyzh_parent(2,j) - yi
-          rij(3) = xyzh_parent(3,j) - zi
-          gradhj = xyzh_parent(5,j)
+       ! Skip empty cells AND inactive cells
+       if (k <= 0) cycle over_pcells
+
+       ! Get the neighbour list and fill the cell cache
+       call get_neighbour_list(icell,listneigh,nneigh,xyzh_parent(1:4,:),xyzcache_parent,maxcellcache,getj=.true.)
+
+       ! Loop over particles in the cell
+       over_pparts: do ip = inoderange(1,icell),inoderange(2,icell)
+          i  = inodeparts(ip)
+          xi = xyzh_parent(1,i)
+          yi = xyzh_parent(2,i)
+          zi = xyzh_parent(3,i)
+          hi = xyzh_parent(4,i)
+          gradhi = xyzh_parent(5,i)
+          hi12   = 1.0/(hi*hi)
+          hi14   = hi12*hi12
+          rhoi1  = 1.0/rhoh(hi,pmass_parent)
+
+          over_pneighbours: do ineigh = 1,nneigh
+             j = abs(listneigh(ineigh))
+             if (i==j) cycle over_pneighbours
+
+             rij(1) = xyzh_parent(1,j) - xi
+             rij(2) = xyzh_parent(2,j) - yi
+             rij(3) = xyzh_parent(3,j) - zi
+             gradhj = xyzh_parent(5,j)
 
 #ifdef PERIODIC
-          if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
-          if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
-          if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
+             if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
+             if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
+             if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
 #endif
-          rij2 = dot_product(rij,rij)
-          runi = rij/sqrt(rij2)
-          qi2  = rij2*hi12
-          qj2  = rij2/xyzh_parent(4,j)**2
-          if (qi2 < radkern2) then
-             grrhoonrhoe_parent(:,i) = grrhoonrhoe_parent(:,i) - runi*grkern(qi2,sqrt(qi2))*cnormk*gradhi*hi14*rhoi1
-          endif
-          if (qj2 < radkern2) then
-             denom = xyzh_parent(4,j)**4 * rhoh(xyzh_parent(4,j),pmass_parent)
-             grrhoonrhoe_parent(:,i) = grrhoonrhoe_parent(:,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradhj/denom
-          endif
-       enddo over_pneighbours
-       grrhoonrhoe_parent(:,i) = pmass_parent*grrhoonrhoe_parent(:,i)
-    enddo over_pparts
+             rij2 = dot_product(rij,rij)
+             runi = rij/sqrt(rij2)
+             qi2  = rij2*hi12
+             qj2  = rij2/xyzh_parent(4,j)**2
+             if (qi2 < radkern2) then
+                grrhoonrhoe_parent(:,i) = grrhoonrhoe_parent(:,i) - runi*grkern(qi2,sqrt(qi2))*cnormk*gradhi*hi14*rhoi1
+             endif
+             if (qj2 < radkern2) then
+                denom = xyzh_parent(4,j)**4 * rhoh(xyzh_parent(4,j),pmass_parent)
+                grrhoonrhoe_parent(:,i) = grrhoonrhoe_parent(:,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradhj/denom
+             endif
+          enddo over_pneighbours
+          grrhoonrhoe_parent(:,i) = pmass_parent*grrhoonrhoe_parent(:,i)
+       enddo over_pparts
+    enddo over_pcells
 !$omp end parallel do
 #endif
  else
@@ -311,13 +330,13 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     errave   = 0.
     stddev   = 0.
     nparterr = 0
-    derrmax  = tiny(derrmax)
+    derrmax  = 0.
 
     ! determine how much to shift by
 !$omp parallel do default (none) &
-!$omp shared(xyzh,npart,pmass,dx_shift,gradh,rmin,rmax,iprofile,dedge,dmed,dr1,idebug) &
+!$omp shared(xyzh,npart,pmass,dx_shift,gradh,max_shift_thresh2,rmin,rmax,iprofile,dedge,dmed,dr1,idebug) &
 !$omp shared(use_parent_h,n_parent,xyzh_parent,grrhoonrhoe_parent,totalshift,pmass_parent) &
-!$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall,derrmax) &
+!$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
 #endif
@@ -326,7 +345,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 !$omp private(err,maggradi,maggrade,magshift,at_interface) &
 !$omp private(twoh21,kernsum) & ! unique to splitting
 !$omp reduction(min: errmin) &
-!$omp reduction(max: errmax) &
+!$omp reduction(max: errmax,derrmax) &
 !$omp reduction(+:   errave,stddev,nparterr)
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
@@ -457,9 +476,9 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           dx_shift(:,i) = grrhoonrhoi + signg*grrhoonrhoe
 
           ! limit the particle shift to 0.5h
-          magshift  = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
+          magshift        = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
           if (magshift > 0.25*hi*hi) dx_shift(:,i) = 0.5*hi*dx_shift(:,i)/sqrt(magshift)
-          if (magshift*hi12 > derrmax) derrmax = magshift*hi12 ! metric to track for exiting loop
+          derrmax         = max(derrmax,magshift*hi12) ! metric to track for exiting loop
           totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
 
           ! debugging statements
@@ -553,8 +572,8 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        if (idebug > 1) write(333,*) ' '
     endif
 
-    ! Determine if particles are shuffling less than 1.E-6 of their hi
-    if (derrmax < 1.E-6) shuffle = .false.
+    ! Determine if particles are shuffling less than max_shift_thresh of their hi
+    if (derrmax < max_shift_thresh2) shuffle = .false.
 
     ! update counter
     ishift = ishift + 1

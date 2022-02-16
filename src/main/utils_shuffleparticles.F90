@@ -83,7 +83,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross
  integer,save :: listneigh(maxneigh)
  real         :: stressmax,max_shift_thresh,max_shift_thresh2,rmin,rmax,dr,dr1,dedge,dmed
- real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,derrmax,err
+ real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,derrmax2,err
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
@@ -330,7 +330,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     errave   = 0.
     stddev   = 0.
     nparterr = 0
-    derrmax  = 0.
+    derrmax2 = 0.
 
     ! determine how much to shift by
 !$omp parallel do default (none) &
@@ -345,7 +345,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 !$omp private(err,maggradi,maggrade,magshift,at_interface) &
 !$omp private(twoh21,kernsum) & ! unique to splitting
 !$omp reduction(min: errmin) &
-!$omp reduction(max: errmax,derrmax) &
+!$omp reduction(max: errmax,derrmax2) &
 !$omp reduction(+:   errave,stddev,nparterr)
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
@@ -478,7 +478,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           ! limit the particle shift to 0.5h
           magshift        = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
           if (magshift > 0.25*hi*hi) dx_shift(:,i) = 0.5*hi*dx_shift(:,i)/sqrt(magshift)
-          derrmax         = max(derrmax,magshift*hi12) ! metric to track for exiting loop
+          derrmax2        = max(derrmax2,magshift*hi12) ! metric to track for exiting loop
           totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
 
           ! debugging statements
@@ -573,7 +573,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     endif
 
     ! Determine if particles are shuffling less than max_shift_thresh of their hi
-    if (derrmax < max_shift_thresh2) shuffle = .false.
+    if (derrmax2 < max_shift_thresh2) shuffle = .false.
 
     ! update counter
     ishift = ishift + 1
@@ -611,7 +611,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     if (iprofile /= ipart) close(335)
  endif
  write(iprint,'(1x,2(a,I6),a,es18.10)') 'Shuffling: completed with ',ishift,' iterations on call number ', &
-                                        ncall, ' and max shift of ',sqrt(derrmax)
+                                        ncall, ' and max shift of ',sqrt(derrmax2)
  ncall = ncall + 1
 
 end subroutine shuffleparticles

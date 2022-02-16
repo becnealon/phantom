@@ -80,76 +80,27 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  real,    optional, intent(inout) :: xyzh_parent(:,:)
  logical, optional, intent(in)    :: is_setup
  character(len=*) , optional, intent(in)    :: prefix
- integer      :: i,j,k,jm1,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross
+ integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross
  integer,save :: listneigh(maxneigh)
  real         :: stressmax,rmin,rmax,dr,dr1,dedge,dmed
- real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,err
+ real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,derrmax,err
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
- real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard),derrmax
+ real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard)
  real,save    :: xyzcache(maxcellcache,4)
  real,save    :: xyzcache_parent(maxcellcache,4)
- logical      :: shuffle,at_interface,use_parent_h,use_metric
+ logical      :: shuffle,at_interface,use_parent_h
  character(len=128) :: prefix0,fmt1,fmt2,fmt3
  !$omp threadprivate(xyzcache,xyzcache_parent,listneigh)
 
  !--Initialise free parameters
- idebug       =    1 ! 0 = off; 1=print initial & final distribution + errors; 2=print every step; 3=print every step with gradients
+ idebug       =    1 ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
  nshiftmax    =  600 ! maximum number of shuffles/iterations
- use_metric   = .true. ! use an error metric?
  !--Initialise remaining parameters
  rnine        =    0.
  rtwelve      =    0.
  use_parent_h = .true. ! to prevent compiler warnings
-
- !--Open debugging files and print the initial particle placements
- if (idebug > 0) then
-    if (present(prefix)) then
-       prefix0 = trim(prefix)//'_'
-    else
-       prefix0 = ''
-    endif
-    if (firstcall) then
-       open(unit=332,file=trim(prefix0)//'shuffling_totalshift.dat')
-       open(unit=333,file=trim(prefix0)//'shuffling_partposition.dat')
-       open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat')
-       open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat')
-       open(unit=336,file=trim(prefix0)//'shuffling_error_metrics.dat')
-       do j = 334,335
-          write(j,"('#',13(1x,'[',i2.2,1x,a11,']',2x))") &
-             1,'ishift',&
-             2,'min rho err', &
-             3,'ave rho err', &
-             4,'max rho err', &
-             5,'mn dd/d err', &
-             6,'av dd/d err', &
-             7,'mx dd/d err', &
-             8,'min shift/h', &
-             9,'ave shift/h', &
-            10,'max shift/h', &
-            11,'stddev_rho',  &
-            12,'stddev_grho', &
-            13,'ncall'
-       enddo
-       write(j,"('#',2(1x,'[',i2.2,1x,a11,']',2x))") &
-       1,'ishift', &
-       2,'maxshift'
-       firstcall = .false.
-    else
-       open(unit=332,file=trim(prefix0)//'shuffling_totalshift.dat',        position='append')
-       open(unit=333,file=trim(prefix0)//'shuffling_partposition.dat',      position='append')
-       open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat',         position='append')
-       open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat',position='append')
-       open(unit=336,file=trim(prefix0)//'shuffling_error_metrics.dat',     position='append')
-       do j = 332,335
-          write(j,'(a)') ' '
-       enddo
-    endif
-    do i = 1,npart
-       write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),rtwelve,ncall
-    enddo
- endif
 
  !--Determine what has been passed in
  if (idebug > 0) then
@@ -278,6 +229,65 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     dr1 = 0.
  endif
 
+ !--Open debugging files and print the initial particle placements
+ if (idebug > 0) then
+    if (present(prefix)) then
+       prefix0 = trim(prefix)//'_'
+    else
+       prefix0 = ''
+    endif
+    if (firstcall) then
+       if (idebug > 1) then
+          open(unit=332,file=trim(prefix0)//'shuffling_totalshift.dat')
+          if (idebug > 2) then
+             open(unit=333,file=trim(prefix0)//'shuffling_partposition.dat')
+          endif
+       endif
+       open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat')
+       if (iprofile/=ipart) then
+          open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat')
+          p = 335
+       else
+          p = 334
+       endif
+       do j = 334,p
+          write(j,"('#',13(1x,'[',i2.2,1x,a11,']',2x))") &
+             1,'ishift',&
+             2,'min rho err', &
+             3,'ave rho err', &
+             4,'max rho err', &
+             5,'mn dd/d err', &
+             6,'av dd/d err', &
+             7,'mx dd/d err', &
+             8,'min shift/h', &
+             9,'ave shift/h', &
+            10,'max shift/h', &   ! This is the criteria used to exit the shuffling loop
+            11,'stddev_rho',  &
+            12,'stddev_grho', &
+            13,'ncall'
+       enddo
+       firstcall = .false.
+    else
+       if (idebug > 1) then
+          open(unit=332,file=trim(prefix0)//'shuffling_totalshift.dat',position='append')
+          write(332,'(a)') ' '
+          if (idebug > 2) then
+             open(unit=333,file=trim(prefix0)//'shuffling_partposition.dat',position='append')
+             write(333,'(a)') ' '
+             do i = 1,npart
+                write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),rtwelve,ncall
+             enddo
+          endif
+       endif
+       open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat',position='append')
+       write(334,'(a)') ' '
+       if (iprofile/=ipart) then
+          open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat',position='append')
+          write(335,'(a)') ' '
+       endif
+    endif
+ endif
+
  !--initialise memory for linklist
  if (present(is_setup)) then
     if (is_setup) call allocate_linklist()
@@ -318,7 +328,6 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 !$omp reduction(min: errmin) &
 !$omp reduction(max: errmax) &
 !$omp reduction(+:   errave,stddev,nparterr)
-
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
 
@@ -340,8 +349,6 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           rhoi  = rhoh(hi,pmass)
           rhoi1 = 1.0/rhoi
           radi  = sqrt(xi*xi + yi*yi + zi*zi)
-          !coefi = 0.0225*hi*hi
-          !coefi = 0.075*hi*hi
           coefi = 0.25*hi*hi
           grrhoonrhoi = 0.
 
@@ -437,7 +444,6 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 grrhoonrhoe(3) = drhoe*zi/(rhoe*radi)
             endif
           endif
-         ! print*, i,grrhoonrhoe,coefi
 
           ! shift the particles
           grrhoonrhoi  = coefi*pmass*grrhoonrhoi   ! multiply in the correct coefficients for the i'th particle
@@ -452,8 +458,8 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 
           ! limit the particle shift to 0.5h
           magshift  = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
-          if (magshift/hi > derrmax) derrmax = magshift/hi
           if (magshift > 0.25*hi*hi) dx_shift(:,i) = 0.5*hi*dx_shift(:,i)/sqrt(magshift)
+          if (magshift*hi12 > derrmax) derrmax = magshift*hi12 ! metric to track for exiting loop
           totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
 
           ! debugging statements
@@ -491,8 +497,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 errave(2,2) = errave(2,2) + err
              endif
              ! calculate the magnitude of the shift
-             magshift  = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
-             err       = sqrt(magshift)/hi
+             err         = sqrt(magshift)/hi
              errmin(3,1) = min(errmin(3,1),err)
              errmax(3,1) = max(errmax(3,1),err)
              errave(3,1) = errave(3,1) + err
@@ -508,7 +513,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 stddev(1,2) = stddev(1,2) + (rhoe - rhoi)**2
                 stddev(2,2) = stddev(2,2) + (maggrade - maggradi)**2
              endif
-             if (idebug == 3) then
+             if (idebug == 4) then
 !$omp critical
                 write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(hi,pmass),&
                 dx_shift(:,i),grrhoonrhoi,grrhoonrhoe,magshift,maggradi,maggrade,ncall
@@ -532,25 +537,24 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                           ,errmin(2,1),errave(2,1)/npart,errmax(2,1) &
                           ,errmin(3,1),errave(3,1)/npart,errmax(3,1) &
                           ,stddev(1:2,1),ncall
-       write(335,'(I18,1x,11(es18.10,1x),I18)') ishift &
+       if (iprofile/=ipart) then
+          write(335,'(I18,1x,11(es18.10,1x),I18)') ishift &
                           ,errmin(1,2),errave(1,2)/nparterr,errmax(1,2) &
                           ,errmin(2,2),errave(2,2)/nparterr,errmax(2,2) &
                           ,errmin(3,2),errave(3,2)/nparterr,errmax(3,2) &
                           ,stddev(1:2,2),ncall
-       write(336,'(I18,1x,es18.10)') ishift, derrmax
-       if (idebug==2) then
+       endif
+       if (idebug==3) then
           do i = 1,npart
              write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),&
              dx_shift(:,i),rnine,ncall
           enddo
        endif
-       if (idebug/=1) write(333,*) ' '
+       if (idebug > 1) write(333,*) ' '
     endif
 
     ! Determine if particles are shuffling less than 1.E-6 of their hi
-    if (use_metric) then
-      if (derrmax < 1.E-6) shuffle = .false.
-    endif
+    if (derrmax < 1.E-6) shuffle = .false.
 
     ! update counter
     ishift = ishift + 1
@@ -572,19 +576,23 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 
  ! final debugging print-statements
  if (idebug > 0) then
-    do i = 1,npart
-       write(332,'(I18,1x,7(es18.10,1x),I18)') i,xyzh(1:4,i),totalshift(1:3,i),ncall
-    enddo
-    if (idebug == 1) then
+    if (idebug > 1) then
        do i = 1,npart
-          write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),rtwelve,ncall
+          write(332,'(I18,1x,7(es18.10,1x),I18)') i,xyzh(1:4,i),totalshift(1:3,i),ncall
        enddo
+       close(332)
+       if (idebug > 2) then
+          do i = 1,npart
+             write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(xyzh(4,i),pmass),rtwelve,ncall
+          enddo
+          close(333)
+       endif
     endif
-    do i = 332,335,336
-       close(i)
-    enddo
+    close(334)
+    if (iprofile /= ipart) close(335)
  endif
- write(iprint,'(1x,2(a,I6))') 'Shuffling: completed with ',ishift,' iterations on call number ',ncall
+ write(iprint,'(1x,2(a,I6),a,es18.10)') 'Shuffling: completed with ',ishift,' iterations on call number ', &
+                                        ncall, ' and max shift of ',sqrt(derrmax)
  ncall = ncall + 1
 
 end subroutine shuffleparticles

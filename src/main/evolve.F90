@@ -839,10 +839,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
         hmin_new = min(hmin_new,xyzh(4,i))
      enddo
      ! update timestep
-     if (hmin_new < hmin_old) then
-        print*, dt,dt*0.1*hmin_new/hmin_old
-        dt = dt*hmin_new/hmin_old
-     endif
+     if (hmin_new < hmin_old) dt = dt*hmin_new/hmin_old
   else
     print*,'No shift done, check shift type'
   endif

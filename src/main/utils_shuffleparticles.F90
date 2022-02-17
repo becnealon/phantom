@@ -80,28 +80,31 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  real,    optional, intent(inout) :: xyzh_parent(:,:)
  logical, optional, intent(in)    :: is_setup
  character(len=*) , optional, intent(in)    :: prefix
- integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross
+ integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross,nlink
  integer,save :: listneigh(maxneigh)
- real         :: stressmax,max_shift_thresh,max_shift_thresh2,rmin,rmax,dr,dr1,dedge,dmed
- real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,derrmax2,err
+ real         :: stressmax,rmin,rmax,dr,dr1,dedge,dmed
+ real         :: max_shift2,max_shift_thresh,max_shift_thresh2,link_shift,link_shift_thresh
+ real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,err
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
  real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard)
  real,save    :: xyzcache(maxcellcache,4)
  real,save    :: xyzcache_parent(maxcellcache,4)
- logical      :: shuffle,at_interface,use_parent_h
+ logical      :: shuffle,at_interface,use_parent_h,call_linklist
  character(len=128) :: prefix0,fmt1,fmt2,fmt3
  !$omp threadprivate(xyzcache,xyzcache_parent,listneigh)
 
  !--Initialise free parameters
- idebug           =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
- nshiftmax        =  600  ! maximum number of shuffles/iterations
- max_shift_thresh = 4.d-3 ! will stop shuffling once (maximum shift)/h is less than this value
+ idebug            =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
+ nshiftmax         =  600  ! maximum number of shuffles/iterations
+ max_shift_thresh  = 4.d-3 ! will stop shuffling once (maximum shift)/h is less than this value
+ link_shift_thresh = 0.01  ! will recalculate the link list when the cumulative maximum relative shift surpasses this limit
  !--Initialise remaining parameters
- rnine        =    0.
- rtwelve      =    0.
- use_parent_h = .true. ! to prevent compiler warnings
+ rnine             = 0.
+ rtwelve           = 0.
+ use_parent_h      = .true. ! to prevent compiler warnings
+ call_linklist     = .true.
  max_shift_thresh2 = max_shift_thresh*max_shift_thresh
 
  !--Determine what has been passed in
@@ -316,21 +319,26 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  ishift     = 0
  shuffle    = .true.
  totalshift = 0.
+ nlink      = 0
 
  do while (shuffle .and. ishift < nshiftmax)
     ! update densities
-    call set_linklist(npart,npart,xyzh,vxyzu)
+    if (call_linklist) then
+       call set_linklist(npart,npart,xyzh,vxyzu)
+       nlink      = nlink + 1
+       link_shift = 0.
+    endif
     call densityiterate(2,npart,npart,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
                                fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
 
     ! initialise variables for this loop
-    dx_shift = 0.
-    errmin   = huge(errmin)
-    errmax   = 0.
-    errave   = 0.
-    stddev   = 0.
-    nparterr = 0
-    derrmax2 = 0.
+    dx_shift   = 0.
+    errmin     = huge(errmin)
+    errmax     = 0.
+    errave     = 0.
+    stddev     = 0.
+    nparterr   = 0
+    max_shift2 = 0.
 
     ! determine how much to shift by
 !$omp parallel do default (none) &
@@ -345,7 +353,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 !$omp private(err,maggradi,maggrade,magshift,at_interface) &
 !$omp private(twoh21,kernsum) & ! unique to splitting
 !$omp reduction(min: errmin) &
-!$omp reduction(max: errmax,derrmax2) &
+!$omp reduction(max: errmax,max_shift2) &
 !$omp reduction(+:   errave,stddev,nparterr)
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
@@ -478,7 +486,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           ! limit the particle shift to 0.5h
           magshift        = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
           if (magshift > 0.25*hi*hi) dx_shift(:,i) = 0.5*hi*dx_shift(:,i)/sqrt(magshift)
-          derrmax2        = max(derrmax2,magshift*hi12) ! metric to track for exiting loop
+          max_shift2      = max(max_shift2,magshift*hi12) ! metric to track for exiting loop
           totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
 
           ! debugging statements
@@ -572,11 +580,24 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        if (idebug > 1) write(333,*) ' '
     endif
 
-    ! Determine if particles are shuffling less than max_shift_thresh of their hi
-    if (derrmax2 < max_shift_thresh2) shuffle = .false.
+    ! Update the maximum shift; this is summing max shifts per loop, so we're not necessarily using contributions from the same particle
+    link_shift = link_shift + sqrt(max_shift2)
 
-    ! update counter
+    ! Determine if particles are shuffling less than max_shift_thresh of their hi
+    if (max_shift2 < max_shift_thresh2) then
+       if (call_linklist) shuffle = .false.  ! can only end on an iteration where the linklist was called
+       call_linklist = .true.
+    else
+       if (link_shift > link_shift_thresh) then
+          call_linklist = .true.
+       else
+          call_linklist = .false.
+       endif
+    endif
+
+    ! update counter; ensure linklist will be called on final loop
     ishift = ishift + 1
+    if (ishift == nshiftmax-1) call_linklist = .true.
  enddo
 
  ! re-adjust particles to ensure none crossed the boundary
@@ -610,8 +631,8 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     close(334)
     if (iprofile /= ipart) close(335)
  endif
- write(iprint,'(1x,2(a,I6),a,es18.10)') 'Shuffling: completed with ',ishift,' iterations on call number ', &
-                                        ncall, ' and max shift of ',sqrt(derrmax2)
+ write(iprint,'(1x,3(a,I6),a,es18.10)') 'Shuffling: completed with ',ishift,' iterations on call number ',ncall, &
+                                        ' with ',nlink,' calls to linklist and max shift of ',sqrt(max_shift2)
  ncall = ncall + 1
 
 end subroutine shuffleparticles

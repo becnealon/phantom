@@ -99,7 +99,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  idebug            =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
  nshiftmax         =  600  ! maximum number of shuffles/iterations
  max_shift_thresh  = 4.d-3 ! will stop shuffling once (maximum shift)/h is less than this value
- link_shift_thresh = 0.01  ! will recalculate the link list when the cumulative maximum relative shift surpasses this limit
+ link_shift_thresh = 0.01  ! will recalculate the link list when the cumulative maximum relative shift surpasses this limit (=0 will call every loop)
  !--Initialise remaining parameters
  rnine             = 0.
  rtwelve           = 0.

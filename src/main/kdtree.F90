@@ -719,6 +719,7 @@ subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, 
 #endif
 
  wassplit = (npnodetot > minpart)
+ if (split_test>0) wassplit = (npnodetot > split_test)
 
  if (.not. wassplit) then
     nodeentry%leftchild  = 0
@@ -1069,136 +1070,6 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
  nr = max_r - min_r + 1
 
 end subroutine special_sort_particles_in_cell
-
-!----------------------------------------------------------------
-!+
-!  Takes in the current xpivot, checks to see if it needs
-!  to be shifted to give a particular number of particles on
-!  either side. Currently seeks multiples of nchild on each.
-!  NB: this can definitely be incorporated into the above routine
-!  in a cleverer + faster way
-!+
-!----------------------------------------------------------------
-subroutine slide_xpivot(xpivot,iaxis,npnode,i1,xyzh_soa,xmaxi,xmini,xyzcofm,imin,imax)
-  use io, only:fatal
- real, intent(inout)     :: xpivot
- integer, intent(inout)  :: iaxis
- real, intent(in)        :: xyzh_soa(:,:),xmaxi(:),xmini(:),xyzcofm(:)
- integer, intent(in)  :: npnode,i1,imin,imax
- real :: dpivot(npnode),extra_dist,xpivot_new
- logical :: slide_left, slide_right,finished,on_pivot
- integer :: rhs,lhs,i,rem_rhs,rem_lhs,ii,kk,extra,iaxis_new,count,mm,nchild
-
- finished = .false.
- xpivot_new = xpivot
- iaxis_new = iaxis
- count = 0
- on_pivot = .false.
-
- ! Check a number divisible by nchild is given
- nchild = 13
- if (modulo((npnode),nchild)> 0) then
-   print*,npnode,'not divisible by (nchild+1 put into slide_xpivot)'
-   print*,'cannot expect this routine to work!'
-   !stop
- endif
-
-sliding: do while (.not.finished)
-   ! work out how many particles are on either side of existing pivot
-   slide_left = .false.
-   slide_right = .false.
-   rhs = 0
-   lhs = 0
-   do i=i1,i1+npnode-1
-      dpivot(i-i1+1) = xpivot_new - xyzh_soa(i,iaxis_new)
-      if (dpivot(i-i1+1) > epsilon(dpivot)) rhs = rhs + 1
-      if (dpivot(i-i1+1) <= epsilon(dpivot)) lhs = lhs + 1
-   enddo
-
-   ! work out if we should move the pivot to get an even split
-   rem_rhs = modulo(rhs,nchild)
-   rem_lhs = modulo(lhs,nchild)
-   if (rem_rhs <= rem_lhs) slide_right = .true.
-   if (rem_lhs < rem_rhs) slide_left = .true.
-
-   ! override the above to force minimum in cell of nchild
-   if (lhs < nchild) then
-     slide_right = .true.
-     slide_left = .false.
-   elseif (rhs < nchild) then
-     slide_left = .true.
-     slide_right = .false.
-   endif
-
-   ! if it's good, exit
-   if (.not.slide_left .and. .not.slide_right) then
-     iaxis = iaxis_new
-     xpivot = xpivot_new
-     return
-   endif
-
-   ! alternatively, slide the pivot such that the new cell will be
-   ! balanced as desired
-   if (slide_right) then
-     do ii = 1,rem_rhs
-       ! slide to the next particle across
-       kk = minloc(dpivot,dim=1,mask=dpivot.gt.0.)
-       ! ditch it, go again
-       dpivot(kk) = huge(kk)
-     enddo
-     ! add a bit to make sure pivot is not *on* a particle
-     extra =  minloc(dpivot,dim=1,mask=dpivot.gt.0.)
-     extra_dist = abs(0.5*(xyzh_soa(extra+i1-1,iaxis_new)-xyzh_soa(kk+i1-1,iaxis_new)))
-     xpivot_new = xyzh_soa(kk+i1-1,iaxis_new) - extra_dist
-   elseif (slide_left) then
-     do ii = 1,rem_lhs
-       ! slide to the next particle across
-       kk =  maxloc(dpivot,dim=1,mask=dpivot.lt.0.)
-       ! ditch it, go again
-       dpivot(kk) = epsilon(dpivot)
-     enddo
-     ! add a bit to make sure pivot is not *on* a particle
-     extra =  maxloc(dpivot,dim=1,mask=dpivot.lt.0.)
-     extra_dist = abs(0.5*(xyzh_soa(extra+i1-1,iaxis_new)-xyzh_soa(kk+i1-1,iaxis_new)))
-     xpivot_new = xyzh_soa(kk+i1-1,iaxis_new) + extra_dist
-   endif
-
-   rhs = 0
-   lhs = 0
-   do i=i1,i1+npnode-1
-      dpivot(i-i1+1) = xpivot_new - xyzh_soa(i,iaxis_new)
-      if (dpivot(i-i1+1) > epsilon(dpivot)) rhs = rhs + 1
-      if (dpivot(i-i1+1) <= epsilon(dpivot)) lhs = lhs + 1
-      if (abs(dpivot(i-i1+1)) < epsilon(dpivot)) on_pivot = .true.
-   enddo
-
-   if (on_pivot) then
-     ! Easiest way to avoid this is simply to move the pivot slightly,
-     ! but keep the numbers the same
-     if (slide_left) xpivot_new = xpivot_new + epsilon(xpivot_new)
-     if (slide_right) xpivot_new = xpivot_new - epsilon(xpivot_new)
-   endif
-
-    if (modulo(rhs,nchild) > 0 .or. modulo(lhs,nchild) > 0) then
-     ! this occurs if particles happen to lie on the plane of the pivot
-     ! pick the next biggest axis to cut across
-      iaxis_new = maxloc(xmaxi - xmini,1,(xmaxi - xmini) < (xmaxi(iaxis_new) - xmini(iaxis_new)))
-     if (iaxis_new ==0) then
-       print*,npnode,'sent into slide pivot, cannot find appropriate axis to split across'
-        stop
-      endif
-      xpivot_new = xyzcofm(iaxis_new)
-      count = count + 1
-      on_pivot = .false.
-    else
-      finished = .true.
-    endif
- enddo sliding
-
- iaxis = iaxis_new
- xpivot = xpivot_new
-
-end subroutine slide_xpivot
 
 !----------------------------------------------------------------
 !+

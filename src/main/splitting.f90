@@ -170,10 +170,10 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
            all_split = .false.
            !print*, 'calculating density gradient of unsplit particles'
            !call calc_gradrho(npart,xyzh)
-           xyzh_parent(1:4,1:npart) = xyzh(1:4,1:npart)
-           xyzh_parent(  5,1:npart) = gradh(1,1:npart)
-           n_parent = npart
-           pmass_parent = massoftype(isplit)
+           xyzh_ref(1:4,1:npart) = xyzh(1:4,1:npart)
+           xyzh_ref(  5,1:npart) = gradh(1,1:npart)
+           n_ref = npart
+           pmass_ref = massoftype(isplit)
         endif
     else
        !kill_me = .true.
@@ -188,10 +188,10 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
           all_split = .true.
           !print*, 'calculating density gradient of split particles'
           !call calc_gradrho(npart,xyzh)
-          xyzh_parent(1:4,1:npart) = xyzh(1:4,1:npart)
-          xyzh_parent(  5,1:npart) = gradh(1,1:npart)
-          n_parent = npart
-          pmass_parent = massoftype(igas)
+          xyzh_ref(1:4,1:npart) = xyzh(1:4,1:npart)
+          xyzh_ref(  5,1:npart) = gradh(1,1:npart)
+          n_ref = npart
+          pmass_ref = massoftype(igas)
        endif
     endif
 

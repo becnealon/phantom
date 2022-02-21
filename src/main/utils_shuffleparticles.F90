@@ -55,13 +55,13 @@ contains
 !     rtab: array radial positions
 !     dtab: array with density positions
 !  Particle distribution:
-!     xyzh_parent:  array containing the position of the parent particles
-!     pmass_parent: mass of the parent particle
-!     n_parent:     number of parent particles
+!     xyzh_ref:  array containing the position of the reference particles
+!     pmass_ref: mass of the reference particle
+!     n_ref:     number of reference particles
 !
 !-------------------------------------------------------------------
 subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab,rtab,dtab,dcontrast, &
-                            xyzh_parent,pmass_parent,n_parent,is_setup,prefix)
+                            xyzh_ref,pmass_ref,n_ref,is_setup,prefix)
  use dim,          only:maxneigh,maxp_hard
  use part,         only:vxyzu,divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind
  use part,         only:gradh,rad,radprop,dvdx,rhoh,hrho
@@ -74,10 +74,10 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  integer,           intent(in)    :: iprint,npart
  real,              intent(in)    :: pmass
  real,              intent(inout) :: xyzh(:,:)
- integer, optional, intent(in)    :: ntab,n_parent
- real,    optional, intent(in)    :: rsphere,dsphere,dmedium,dcontrast,pmass_parent
+ integer, optional, intent(in)    :: ntab,n_ref
+ real,    optional, intent(in)    :: rsphere,dsphere,dmedium,dcontrast,pmass_ref
  real,    optional, intent(in)    :: rtab(:),dtab(:)
- real,    optional, intent(inout) :: xyzh_parent(:,:)
+ real,    optional, intent(inout) :: xyzh_ref(:,:)
  logical, optional, intent(in)    :: is_setup
  character(len=*) , optional, intent(in)    :: prefix
  integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross,nlink
@@ -88,12 +88,12 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
- real         :: twoh21,kernsum,grrhoonrhoe_parent(3,maxp_hard)
+ real         :: twoh21,kernsum,grrhoonrhoe_ref(3,maxp_hard)
  real,save    :: xyzcache(maxcellcache,4)
- real,save    :: xyzcache_parent(maxcellcache,4)
- logical      :: shuffle,at_interface,use_parent_h,call_linklist
+ real,save    :: xyzcache_ref(maxcellcache,4)
+ logical      :: shuffle,at_interface,use_ref_h,call_linklist
  character(len=128) :: prefix0,fmt1,fmt2,fmt3
- !$omp threadprivate(xyzcache,xyzcache_parent,listneigh)
+ !$omp threadprivate(xyzcache,xyzcache_ref,listneigh)
 
  !--Initialise free parameters
  idebug            =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
@@ -103,7 +103,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  !--Initialise remaining parameters
  rnine             = 0.
  rtwelve           = 0.
- use_parent_h      = .true. ! to prevent compiler warnings
+ use_ref_h         = .true. ! to prevent compiler warnings
  call_linklist     = .true.
  max_shift_thresh2 = max_shift_thresh*max_shift_thresh
 
@@ -112,17 +112,17 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     write(fmt1,'(a)') '(1x,a)'
     write(fmt2,'(a)') '(1x,a,I8)'
     write(fmt3,'(a)') '(1x,a,Es18.6)'
-    if (present(ntab))         write(iprint,fmt2) 'Shuffling: optional variable is present: ntab: ', ntab
-    if (present(rsphere))      write(iprint,fmt1) 'Shuffling: optional variable is present: rsphere'
-    if (present(dsphere))      write(iprint,fmt1) 'Shuffling: optional variable is present: dsphere'
-    if (present(dmedium))      write(iprint,fmt1) 'Shuffling: optional variable is present: dmedium'
-    if (present(dcontrast))    write(iprint,fmt1) 'Shuffling: optional variable is present: dcontrast'
-    if (present(rtab))         write(iprint,fmt2) 'Shuffling: optional variable is present: rtab: ', size(rtab)
-    if (present(dtab))         write(iprint,fmt2) 'Shuffling: optional variable is present: dtab: ', size(rtab)
-    if (present(xyzh_parent))  write(iprint,fmt1) 'Shuffling: optional variable is present: xyzh_parent'
-    if (present(pmass_parent)) write(iprint,fmt3) 'Shuffling: optional variable is present: pmass_parent: ',pmass_parent
-    if (present(n_parent))     write(iprint,fmt2) 'Shuffling: optional variable is present: n_parent: ',n_parent
-    if (present(is_setup))     write(iprint,fmt1) 'Shuffling: optional variable is present: is_setup'
+    if (present(ntab))      write(iprint,fmt2) 'Shuffling: optional variable is present: ntab: ', ntab
+    if (present(rsphere))   write(iprint,fmt1) 'Shuffling: optional variable is present: rsphere'
+    if (present(dsphere))   write(iprint,fmt1) 'Shuffling: optional variable is present: dsphere'
+    if (present(dmedium))   write(iprint,fmt1) 'Shuffling: optional variable is present: dmedium'
+    if (present(dcontrast)) write(iprint,fmt1) 'Shuffling: optional variable is present: dcontrast'
+    if (present(rtab))      write(iprint,fmt2) 'Shuffling: optional variable is present: rtab: ', size(rtab)
+    if (present(dtab))      write(iprint,fmt2) 'Shuffling: optional variable is present: dtab: ', size(rtab)
+    if (present(xyzh_ref))  write(iprint,fmt1) 'Shuffling: optional variable is present: xyzh_ref'
+    if (present(pmass_ref)) write(iprint,fmt3) 'Shuffling: optional variable is present: pmass_ref: ',pmass_ref
+    if (present(n_ref))     write(iprint,fmt2) 'Shuffling: optional variable is present: n_ref: ',n_ref
+    if (present(is_setup))  write(iprint,fmt1) 'Shuffling: optional variable is present: is_setup'
  endif
 
  !--Determine the exact profile
@@ -167,21 +167,21 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     write(iprint,*) 'Shuffling to a non-uniform sphere'
     write(iprint,*) 'This is untested without a background, so aborting until properly tested'
     return
- elseif (present(xyzh_parent) .and. present(pmass_parent) .and. present(n_parent)) then
+ elseif (present(xyzh_ref) .and. present(pmass_ref) .and. present(n_ref)) then
     iprofile = ipart
-    if (pmass > pmass_parent) then
-       use_parent_h = .true.
+    if (pmass > pmass_ref) then
+       use_ref_h = .true.
     else
-       use_parent_h = .false.
+       use_ref_h = .false.
     endif
-    write(iprint,'(1x,a)') 'Shuffling: Shuffling to a parent array'
+    write(iprint,'(1x,a)') 'Shuffling: Shuffling to a reference array'
 #ifdef SPLITTING
-    !--Calculate grad rho / rho for the parent particles
-    call set_linklist(n_parent,n_parent,xyzh_parent(1:4,:),vxyzu)
+    !--Calculate grad rho / rho for the reference particles
+    call set_linklist(n_ref,n_ref,xyzh_ref(1:4,:),vxyzu)
 
-    grrhoonrhoe_parent = 0.
+    grrhoonrhoe_ref = 0.
 !$omp parallel do default (none) &
-!$omp shared(xyzh_parent,pmass_parent,grrhoonrhoe_parent,n_parent) &
+!$omp shared(xyzh_ref,pmass_ref,grrhoonrhoe_ref,n_ref) &
 !$omp shared(inodeparts,inoderange,ifirstincell,ncells) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
@@ -195,28 +195,28 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        if (k <= 0) cycle over_pcells
 
        ! Get the neighbour list and fill the cell cache
-       call get_neighbour_list(icell,listneigh,nneigh,xyzh_parent(1:4,:),xyzcache_parent,maxcellcache,getj=.true.)
+       call get_neighbour_list(icell,listneigh,nneigh,xyzh_ref(1:4,:),xyzcache_ref,maxcellcache,getj=.true.)
 
        ! Loop over particles in the cell
        over_pparts: do ip = inoderange(1,icell),inoderange(2,icell)
           i  = inodeparts(ip)
-          xi = xyzh_parent(1,i)
-          yi = xyzh_parent(2,i)
-          zi = xyzh_parent(3,i)
-          hi = xyzh_parent(4,i)
-          gradhi = xyzh_parent(5,i)
+          xi = xyzh_ref(1,i)
+          yi = xyzh_ref(2,i)
+          zi = xyzh_ref(3,i)
+          hi = xyzh_ref(4,i)
+          gradhi = xyzh_ref(5,i)
           hi12   = 1.0/(hi*hi)
           hi14   = hi12*hi12
-          rhoi1  = 1.0/rhoh(hi,pmass_parent)
+          rhoi1  = 1.0/rhoh(hi,pmass_ref)
 
           over_pneighbours: do ineigh = 1,nneigh
              j = abs(listneigh(ineigh))
              if (i==j) cycle over_pneighbours
 
-             rij(1) = xyzh_parent(1,j) - xi
-             rij(2) = xyzh_parent(2,j) - yi
-             rij(3) = xyzh_parent(3,j) - zi
-             gradhj = xyzh_parent(5,j)
+             rij(1) = xyzh_ref(1,j) - xi
+             rij(2) = xyzh_ref(2,j) - yi
+             rij(3) = xyzh_ref(3,j) - zi
+             gradhj = xyzh_ref(5,j)
 
 #ifdef PERIODIC
              if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
@@ -226,16 +226,16 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
              rij2 = dot_product(rij,rij)
              runi = rij/sqrt(rij2)
              qi2  = rij2*hi12
-             qj2  = rij2/xyzh_parent(4,j)**2
+             qj2  = rij2/xyzh_ref(4,j)**2
              if (qi2 < radkern2) then
-                grrhoonrhoe_parent(:,i) = grrhoonrhoe_parent(:,i) - runi*grkern(qi2,sqrt(qi2))*cnormk*gradhi*hi14*rhoi1
+                grrhoonrhoe_ref(:,i) = grrhoonrhoe_ref(:,i) - runi*grkern(qi2,sqrt(qi2))*cnormk*gradhi*hi14*rhoi1
              endif
              if (qj2 < radkern2) then
-                denom = xyzh_parent(4,j)**4 * rhoh(xyzh_parent(4,j),pmass_parent)
-                grrhoonrhoe_parent(:,i) = grrhoonrhoe_parent(:,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradhj/denom
+                denom = xyzh_ref(4,j)**4 * rhoh(xyzh_ref(4,j),pmass_ref)
+                grrhoonrhoe_ref(:,i) = grrhoonrhoe_ref(:,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradhj/denom
              endif
           enddo over_pneighbours
-          grrhoonrhoe_parent(:,i) = pmass_parent*grrhoonrhoe_parent(:,i)
+          grrhoonrhoe_ref(:,i) = pmass_ref*grrhoonrhoe_ref(:,i)
        enddo over_pparts
     enddo over_pcells
 !$omp end parallel do
@@ -343,7 +343,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     ! determine how much to shift by
 !$omp parallel do default (none) &
 !$omp shared(xyzh,npart,pmass,dx_shift,gradh,max_shift_thresh2,rmin,rmax,iprofile,dedge,dmed,dr1,idebug) &
-!$omp shared(use_parent_h,n_parent,xyzh_parent,grrhoonrhoe_parent,totalshift,pmass_parent) &
+!$omp shared(use_ref_h,n_ref,xyzh_ref,grrhoonrhoe_ref,totalshift,pmass_ref) &
 !$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
@@ -414,17 +414,15 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           drhoe       = 0.0
           rhoe        = 0.0
           if (iprofile==ipart) then
-             ! determine the kernel-weighted average grad rho / rho for the parent distribution
+             ! determine the kernel-weighted average grad rho / rho for the reference distribution
              ! need to make this more efficient
-             twoh21 = 1./(2.0*xyzh(4,i))**2
-             if (xyzh(4,i) < epsilon(xyzh(4,i))) print*, 'fucking i'
-             kernsum     = 0.
-             over_parents: do j = 1,n_parent
-                rij(1) = xyzh_parent(1,j) - xi
-                rij(2) = xyzh_parent(2,j) - yi
-                rij(3) = xyzh_parent(3,j) - zi
-                if (use_parent_h) twoh21 = 1./(2.0*xyzh_parent(4,j))**2
-                if (xyzh_parent(4,j) < epsilon(xyzh_parent(4,j))) print*, 'fucking j'
+             twoh21  = 1./(2.0*xyzh(4,i))**2
+             kernsum = 0.
+             over_refs: do j = 1,n_ref
+                rij(1) = xyzh_ref(1,j) - xi
+                rij(2) = xyzh_ref(2,j) - yi
+                rij(3) = xyzh_ref(3,j) - zi
+                if (use_ref_h) twoh21 = 1./(2.0*xyzh_ref(4,j))**2
 #ifdef PERIODIC
                 if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
                 if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
@@ -433,14 +431,14 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 rij2 = dot_product(rij,rij)
                 qi2  = rij2*twoh21
                 if (qi2 < radkern2) then
-                   grrhoonrhoe = grrhoonrhoe - grrhoonrhoe_parent(:,j)*wkern(qi2,sqrt(qi2))
+                   grrhoonrhoe = grrhoonrhoe - grrhoonrhoe_ref(:,j)*wkern(qi2,sqrt(qi2))
                    kernsum     = kernsum + wkern(qi2,sqrt(qi2))
                 endif
-             enddo over_parents
+             enddo over_refs
              if (kernsum > 0.) then
                 grrhoonrhoe = grrhoonrhoe/kernsum
              else
-                print*, 'Crap... no neighbours!'
+                print*, 'Shuffling: WARNING! No neighbours when determining reference value!'
              endif
           else
              if (radi < rmin) then

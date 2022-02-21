@@ -669,7 +669,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   use splitmergeutils, only:shift_particles_WVT,shift_particles_Vacondio
   use splitmergeutils, only:quick_rho,hold_child_in_parent_position
   use splitmergeutils, only:xyzgradrho,DJP_eqn17,DJP_eqn13,Hubber_eqn94
-  use splitmergeutils, only:xyzh_parent,n_parent,pmass_parent
+  use splitmergeutils, only:xyzh_ref,n_ref,pmass_ref
   use timestep,        only:dt
   use timestep_ind,    only:nactive
   use linklist,        only:set_linklist
@@ -681,7 +681,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   real, intent(in)    :: rho_ref,time
   integer, intent(in) :: npart
   character(len=*), intent(in) :: prefix
-  real :: stressmax,mu,dmu,beta,xyzh_ref(4,npart),shifts(3,npart),rho_ave,pmass_child
+  real :: stressmax,mu,dmu,beta,xyzh_refi(4,npart),shifts(3,npart),rho_ave,pmass
   real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,rad2
   real :: scoef,xi,yi,zi,hi,twoh2,qi2,qj2,hi12,rhoe,denom,rij2,rhoi1
   real :: err,errmax(3),errave(3),errmin(3),maggrad,magshift,dx_shift(3,npart)
@@ -691,7 +691,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   logical :: converged,keep_on_shifting
 
   shift_type = 'JHW'
-  xyzh_ref(:,:) = xyzh(1:4,1:npart)
+  xyzh_refi(:,:) = xyzh(1:4,1:npart)
 
   if (shift_type == 'WVT') then
     !nshifts = 100.
@@ -763,11 +763,11 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
     ! Set up boundaries
     beta_a = 0.0
     beta_d = 6.0
-    call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_a,shifts)
-    xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+    call shift_particles_Vacondio(npart,xyzh_refi,vxyzu,dt,beta_a,shifts)
+    xyzh(1:3,1:npart) = xyzh_refi(1:3,1:npart) - shifts
     call quick_rho(npart,xyzh,rho_a)
-    call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_d,shifts)
-    xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+    call shift_particles_Vacondio(npart,xyzh_refi,vxyzu,dt,beta_d,shifts)
+    xyzh(1:3,1:npart) = xyzh_refi(1:3,1:npart) - shifts
     call quick_rho(npart,xyzh,rho_d)
 
     ! Iterate
@@ -778,12 +778,12 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
       beta_c = beta_a + beta_d - beta_b
 
       ! Evaluate how good each one is
-      call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_b,shifts)
-      xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+      call shift_particles_Vacondio(npart,xyzh_refi,vxyzu,dt,beta_b,shifts)
+      xyzh(1:3,1:npart) = xyzh_refi(1:3,1:npart) - shifts
       call quick_rho(npart,xyzh,rho_b)
 
-      call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta_c,shifts)
-      xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+      call shift_particles_Vacondio(npart,xyzh_refi,vxyzu,dt,beta_c,shifts)
+      xyzh(1:3,1:npart) = xyzh_refi(1:3,1:npart) - shifts
       call quick_rho(npart,xyzh,rho_c)
 
       print*,'calculated',rho_a,rho_b,rho_c,rho_d,'-------',rho_ref
@@ -810,8 +810,8 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
     endif
   enddo
 
-  call shift_particles_Vacondio(npart,xyzh_ref,vxyzu,dt,beta,shifts)
-  xyzh(1:3,1:npart) = xyzh_ref(1:3,1:npart) - shifts
+  call shift_particles_Vacondio(npart,xyzh_refi,vxyzu,dt,beta,shifts)
+  xyzh(1:3,1:npart) = xyzh_refi(1:3,1:npart) - shifts
 
   print*,'shifted by Vacondio method, new rho_ave',rho_ave
 
@@ -820,18 +820,17 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
 
      ! calculate hmin_old
      hmin_old = huge(hmin_old)
-     do i = 1,n_parent
-        hmin_old = min(hmin_old,xyzh_parent(4,i))
+     do i = 1,n_ref
+        hmin_old = min(hmin_old,xyzh_ref(4,i))
      enddo
 
-     if (abs(massoftype(igas) - pmass_parent) < epsilon(pmass_parent)) then
-        pmass_child = massoftype(isplit)
+     if (abs(massoftype(igas) - pmass_ref) < epsilon(pmass_ref)) then
+        pmass = massoftype(isplit)
      else
-        pmass_child = massoftype(igas)
+        pmass = massoftype(igas)
      endif
-     !print*,'masses:', massoftype(igas), massoftype(isplit),pmass_child,pmass_parent
-     call shuffleparticles(iprint,npart,xyzh,pmass_child, &
-                            xyzh_parent=xyzh_parent,pmass_parent=pmass_parent,n_parent=n_parent,prefix=prefix)
+     !print*,'masses:', massoftype(igas), massoftype(isplit),pmass,pmass_ref
+     call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref,pmass_ref=pmass_ref,n_ref=n_ref,prefix=prefix)
 
      ! calculate hmin_new
      hmin_new = huge(hmin_new)

@@ -31,7 +31,6 @@ module setup
  real            :: xsize  =  1.0  ! size of the box in the x-direction
  real            :: ysize  =  1.0  ! size of the box in the y-direction
  real            :: dy2    =  0.5  ! Width of medium 2 (i.e. central medium)
- logical         :: sinewave = .true.
 contains
 
 !----------------------------------------------------------------
@@ -42,8 +41,8 @@ contains
 subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,time,fileprefix)
  use setup_params, only:npart_total
  use io,           only:master
- use options,      only:nfulldump,nmaxdumps
- use unifdis,      only:set_unifdis
+ use options,      only:nfulldump
+ use unifdis,      only:set_unifdis,rho_func
  use boundary,     only:set_boundary,xmin,ymin,zmin,xmax,ymax,zmax,dxbound,dybound,dzbound
  use mpiutils,     only:bcast_mpi
  use part,         only:igas,periodic
@@ -61,9 +60,10 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  character(len=20), intent(in)    :: fileprefix
  real,              intent(out)   :: vxyzu(:,:)
  character(len=26)                :: filename
- logical :: iexist,is_kh
- integer :: i,j,maxp,maxvxyzu,npartx
- real    :: totmass,deltax,dmin
+ logical :: iexist
+ integer :: i,maxp,maxvxyzu,npartx
+ real    :: totmass,deltax
+ procedure(rho_func), pointer :: density_func
 !
 !--general parameters
 !
@@ -73,25 +73,17 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  filename= trim(fileprefix)//'.in'
  inquire(file=filename,exist=iexist)
  if (.not. iexist) then
-    if (is_kh) then
-       tmax      = 2.00
-       dtmax     = 0.1
-    else
-       tmax      = 1.00
-       dtmax     = 0.01
-       nmaxdumps = 60
-    endif
+    tmax      = 2.00
+    dtmax     = 0.1
     nfulldump = 1
  endif
- is_kh = .false.
 !
 !--set particles
 !
  maxp = size(xyzh(1,:))
  maxvxyzu = size(vxyzu(:,1))
  if (id==master) then
-    npartx = 32
-    npartx = 8
+    npartx = 64
     call prompt('enter number of particles in x direction ',npartx,1,nint(sqrt(maxp/12.)))
  endif
  call bcast_mpi(npartx)
@@ -99,27 +91,15 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
 !
 !--boundary
 !
- if (is_kh) then
-    call set_boundary(0.,xsize,0.,ysize,-2.*sqrt(6.)/npartx,2.*sqrt(6.)/npartx)
- else
-    call set_boundary(-xsize/2,xsize/2,-xsize/2,xsize/2,-xsize/2,xsize/2)
- endif
+ call set_boundary(0.,xsize,0.,ysize,-2.*sqrt(6.)/npartx,2.*sqrt(6.)/npartx)
+
  npart = 0
  npart_total = 0
- if (sinewave) then
-    call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
-                     deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
-                     rhofunc=rhofuncsin,dir=1,mask=i_belong)
- elseif (is_kh .or. .false.) then
-    call set_unifdis('hcp',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
-                     deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
-                     rhofunc=rhofunc,dir=2,mask=i_belong)
- else
-    call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
-!   call set_unifdis('random',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
-                     deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
-                     mask=i_belong)
- endif
+ density_func => rhofunc
+ call set_unifdis('closepacked',id,master,xmin,xmax,ymin,ymax,zmin,zmax,&
+                  deltax,hfact,npart,xyzh,periodic,nptot=npart_total,&
+                  rhofunc=density_func,dir=2,mask=i_belong)
+
  npartoftype(:) = 0
  npartoftype(1) = npart
  print*,' npart = ',npart,npart_total
@@ -129,40 +109,13 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  print*,' particle mass = ',massoftype(1)
 
  do i=1,npart
-    if (is_kh) then
-       vxyzu(1,i) = v1 + Rfunc(xyzh(2,i))*(v2 - v1)
-       vxyzu(2,i) = 0.1*sin(2.*pi*xyzh(1,i))
-       vxyzu(3,i) = 0.
-       if (maxvxyzu > 3) then
-          vxyzu(4,i) = przero/((gamma - 1.)*rhofunc(xyzh(2,i)))
-       endif
-    else
-       vxyzu(1,i) = v1
-       vxyzu(2,i) = 0.
-       vxyzu(3,i) = 0.
-       if (maxvxyzu > 3) then
-          if (sinewave) then
-             vxyzu(4,i) = przero/((gamma - 1.)*rhofuncsin(xyzh(1,i)))
-          else
-             vxyzu(4,i) = przero/((gamma - 1.)*rho1)
-          endif
-       endif
+    vxyzu(1,i) = v1! + Rfunc(xyzh(2,i))*(v2 - v1)
+    vxyzu(2,i) = 0.0 !0.1*sin(2.*pi*xyzh(1,i))
+    vxyzu(3,i) = 0.
+    if (maxvxyzu > 3) then
+       vxyzu(4,i) = przero/((gamma - 1.)*rhofunc(xyzh(2,i)))
     endif
  enddo
- 
- dmin = huge(dmin)
- do j = 1,npart
-    if (dot_product(xyzh(1:3,j),xyzh(1:3,j)) < dmin) then
-       i = j
-       dmin = dot_product(xyzh(1:3,j),xyzh(1:3,j))
-    endif
- enddo
- print*, i,xyzh(1:4,i)
- do j = 1,npart
-    write(170,*) j, sqrt(dot_product((xyzh(1:3,i)-xyzh(1:3,j)),(xyzh(1:3,i)-xyzh(1:3,j))))/deltax
- enddo
-
-
 
 end subroutine setpart
 
@@ -177,19 +130,6 @@ real function rhofunc(y)
  rhofunc = rho1 + Rfunc(y)*(rho2 - rho1)
 
 end function rhofunc
-
-
-!---------------------------------------------------
-!+
-!  New sign function for splitting test (I think)
-!+
-!---------------------------------------------------
-real function rhofuncsin(x)
- real, intent(in) :: x
-
- rhofuncsin = rho1 + 0.05*sin(x*2.0*3.14159/xsize)
-
-end function rhofuncsin
 
 !---------------------------------------------------
 !+

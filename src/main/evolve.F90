@@ -103,7 +103,8 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #ifdef SPLITTING
   use split,           only:update_splitting
   use part,            only:npartoftype
-  use splitmergeutils, only:quick_rho
+  use splitmergeutils, only:quick_rho,xyzh_ref,force_ref,n_ref
+  use relax_particles, only: relaxparticles
 #endif
 
  character(len=*), intent(in)    :: infile
@@ -238,8 +239,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
-  !call quick_rho(npart,xyzh,rho_ave)
-  call update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
+  call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
 #endif
 
     dtmaxold    = dtmax
@@ -272,7 +272,12 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #endif
 
 #ifdef SPLITTING
-    if (need_to_relax) call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix)
+    if (need_to_relax) then
+      ! accelerations method
+      call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref),force_ref(1:3,1:n_ref))
+      ! grad rho/rho method
+      !call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix)
+    endif
 #endif
 
     if (gravity .and. icreate_sinks > 0 .and. ipart_rhomax /= 0) then
@@ -622,6 +627,7 @@ subroutine print_timinginfo(iprint,nsteps,nsteplast,&
  real(kind=4)             :: time_fullstep
  character(len=20)        :: string,string1,string2,string3
 
+
  write(string,"(i12)") nsteps
  call formatreal(real(timer_fromstart%wall),string1)
  call formatreal(real(timer_fromstart%cpu),string2)
@@ -635,7 +641,6 @@ subroutine print_timinginfo(iprint,nsteps,nsteplast,&
  call formatreal(real(timer_lastdump%cpu/(timer_lastdump%wall+epsilon(0._4))),string3)
  write(iprint,"(1x,'Since last dump : ',a,' timesteps, wall: ',a,'s cpu: ',a,'s cpu/wall: ',a)") &
        trim(adjustl(string)),trim(string1),trim(string2),trim(string3)
-
  time_fullstep = timer_lastdump%wall + timer_ev%wall + timer_io%wall
  write(iprint,"(/,16x,a)") ' wall        cpu    cpu/wall   frac'
  call print_timer(iprint,timer_step%label,timer_step, time_fullstep)

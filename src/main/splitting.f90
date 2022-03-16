@@ -49,7 +49,7 @@ contains
 !+
 !----------------------------------------------------------------
 subroutine init_split(ierr)
- use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,iamtype,&
+ use part, only:xyzh,vxyzu,massoftype,set_particle_type,npartoftype,iamtype,fxyzu,&
                 massoftype,npart,copy_particle_all,kill_particle,shuffle_part,isdead_or_accreted
  use splitpart, only: merge_all_particles
  use dim, only:maxp_hard
@@ -87,7 +87,7 @@ call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
 ! 2. should it be split or merged?
 
  if (rand_type==5) then
-    call update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
+    call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  else
 
 merge_count = 0
@@ -129,20 +129,20 @@ end subroutine init_split
 !  and making of ghosts
 !+
 !----------------------------------------------------------------
-subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
+subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  use io,       only:fatal
  use part,     only:kill_particle,isdead_or_accreted,shuffle_part,iactive,periodic, &
                     rhoh,massoftype,igas,isplit,rhoh,gradh
  use timestep, only:time
  integer, intent(inout) :: npart,npartoftype(:)
- real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
+ real,    intent(inout) :: xyzh(:,:),vxyzu(:,:),fxyzu(:,:)
  logical, intent(inout) :: need_to_relax
  integer                :: i,k,add_npart,oldsplits,oldreals
  logical                :: split_it,ghost_it,already_split,rln
  logical                :: make_ghost,send_to_list,kill_me,kill_me_now,do_price,do_Whitworth
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
- real :: orbit
+ real :: orbit,stressmax
  integer :: split_counter, merge_counter
  character(len=40) :: split_shuffle_type,split_error_metric_type
  character(len=40) :: merge_shuffle_type,merge_error_metric_type
@@ -152,7 +152,6 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
  oldsplits = npartoftype(isplit)
  oldreals = npartoftype(igas)
  kill_me_now = .false.
-
 
   ! Reset the boundaries depending on time
   oldsplits = npartoftype(isplit)
@@ -174,6 +173,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
            xyzh_ref(  5,1:npart) = gradh(1,1:npart)
            n_ref = npart
            pmass_ref = massoftype(isplit)
+           force_ref(1:3,1:npart) = fxyzu(1:3,1:npart)
         endif
     else
        !kill_me = .true.
@@ -192,6 +192,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,npartoftype,need_to_relax)
           xyzh_ref(  5,1:npart) = gradh(1,1:npart)
           n_ref = npart
           pmass_ref = massoftype(igas)
+          force_ref(1:3,1:npart) = fxyzu(1:3,1:npart)
        endif
     endif
 

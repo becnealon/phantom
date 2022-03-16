@@ -27,7 +27,7 @@ module splitmergeutils
  logical, public :: centre_particle = .true.
  real, public :: sep_factor = 0.41
  logical, public :: hold_child_in_parent_position = .false. ! This seems broken with the recent updates; don't fix since we would rather not use it.
- real,    public :: xyzgradrho(6,maxp_hard),xyzh_ref(5,maxp_hard),pmass_ref
+ real,    public :: xyzgradrho(6,maxp_hard),xyzh_ref(5,maxp_hard),pmass_ref,force_ref(3,maxp_hard)
  integer, public :: n_ref
  logical, parameter, public :: DJP_eqn17    = .true.  ! JHW's attempt to implement eqn 17 of DJP's notes
  logical, parameter, public :: DJP_eqn13    = .false.  ! JHW's attempt to implement eqn 13 of DJP's notes ! HIS EQUATioN IS BUGGED'; REPURPOSED FOR a hybrid 17
@@ -251,7 +251,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu,scoef,keep_on_shifting)
     errx = 0.
     errn = huge(errn)
     errrms  = 0.
-    np = 0 
+    np = 0
     !if (fmax > 1.) fcoef = 1./fmax
 !$omp parallel default(none) &
 !$omp shared(npart,iphase,xyzh,h0,shifts,k,k1,k3,f_const,dxbound,dybound,dzbound) &
@@ -353,7 +353,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu,scoef,keep_on_shifting)
                 endif
 
                 if (qj2 < radkern2) then
-                   shifts(k1:k3,i) = shifts(k1:k3,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradh(1,j) ! + grad rho 
+                   shifts(k1:k3,i) = shifts(k1:k3,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradh(1,j) ! + grad rho
                 endif
              elseif (Hubber_eqn94) then
                 if (qi2 < radkern2) then
@@ -445,7 +445,7 @@ subroutine shift_particles_WVT(npart,xyzh,h0,mu,scoef,keep_on_shifting)
 !                if (shifts(p,i) >  1.75*hi) shifts(p,i) =  1.75*hi
 !                if (shifts(p,i) < -1.75*hi) shifts(p,i) = -1.75*hi
 !             enddo
-          elseif(DJP_eqn13) then 
+          elseif(DJP_eqn13) then
              gradrho = 0.
              rhoe    = 1.5 + 0.075*sin(2.*pi*(xi+0.5*time))
              gradrho(1) = 2.*pi*0.075*cos(2.*pi*(xi+0.5*time))/rhoe  ! assuming a sine wave density; still broken

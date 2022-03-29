@@ -27,8 +27,8 @@ module splitmergeutils
  logical, public :: centre_particle = .true.
  real, public :: sep_factor = 0.41
  logical, public :: hold_child_in_parent_position = .false. ! This seems broken with the recent updates; don't fix since we would rather not use it.
- real,    public :: xyzgradrho(6,maxp_hard),xyzh_ref(5,maxp_hard),pmass_ref,force_ref(3,maxp_hard)
- integer, public :: n_ref
+ real,    public :: xyzgradrho(6,maxp_hard),xyzh_ref(5,maxp_hard),pmass_ref(maxp_hard),force_ref(3,maxp_hard)
+ integer, public :: n_ref,to_shuffle(maxp_hard),n_toshuffle
  logical, parameter, public :: DJP_eqn17    = .true.  ! JHW's attempt to implement eqn 17 of DJP's notes
  logical, parameter, public :: DJP_eqn13    = .false.  ! JHW's attempt to implement eqn 13 of DJP's notes ! HIS EQUATioN IS BUGGED'; REPURPOSED FOR a hybrid 17
  logical, parameter, public :: Hubber_eqn94 = .false.  ! JHW's attempt to implement eqn 94 of Hubber, Rosotti & Booth (2018)

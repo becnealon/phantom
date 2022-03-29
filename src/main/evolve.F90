@@ -103,7 +103,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 #ifdef SPLITTING
   use split,           only:update_splitting
   use part,            only:npartoftype
-  use splitmergeutils, only:quick_rho,xyzh_ref,force_ref,n_ref
+  use splitmergeutils, only:xyzh_ref,force_ref,n_ref,pmass_ref,to_shuffle,n_toshuffle
   use relax_particles, only: relaxparticles
 #endif
 
@@ -240,6 +240,14 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 
 #ifdef SPLITTING
   call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
+  if (need_to_relax) then
+    ! accelerations method
+    call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
+                        force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
+    ! grad rho/rho method
+    !call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix)
+  endif
+  call shuffle_part(npart)
 #endif
 
     dtmaxold    = dtmax
@@ -269,15 +277,6 @@ subroutine evol(infile,logfile,evfile,dumpfile)
 
     !--print summary of timestep bins
     if (iverbose >= 2) call write_binsummary(npart,nbinmax,dtmax,timeperbin,iphase,ibin,xyzh)
-#endif
-
-#ifdef SPLITTING
-    if (need_to_relax) then
-      ! accelerations method
-      call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref),force_ref(1:3,1:n_ref))
-      ! grad rho/rho method
-      !call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix)
-    endif
 #endif
 
     if (gravity .and. icreate_sinks > 0 .and. ipart_rhomax /= 0) then
@@ -643,13 +642,13 @@ subroutine print_timinginfo(iprint,nsteps,nsteplast,&
        trim(adjustl(string)),trim(string1),trim(string2),trim(string3)
  time_fullstep = timer_lastdump%wall + timer_ev%wall + timer_io%wall
  write(iprint,"(/,16x,a)") ' wall        cpu    cpu/wall   frac'
- call print_timer(iprint,timer_step%label,timer_step, time_fullstep)
- call print_timer(iprint,"step (force)",  timer_force,time_fullstep)
- call print_timer(iprint,"step (dens) ",  timer_dens, time_fullstep)
- call print_timer(iprint,"step (link) ",  timer_link, time_fullstep)
- call print_timer(iprint,"step (extf) ",  timer_extf, time_fullstep)
- call print_timer(iprint,timer_ev%label,  timer_ev,   time_fullstep)
- call print_timer(iprint,timer_io%label,  timer_io,   time_fullstep)
+ !call print_timer(iprint,timer_step%label,timer_step, time_fullstep)
+ !call print_timer(iprint,"step (force)",  timer_force,time_fullstep)
+ !call print_timer(iprint,"step (dens) ",  timer_dens, time_fullstep)
+ !call print_timer(iprint,"step (link) ",  timer_link, time_fullstep)
+ !call print_timer(iprint,"step (extf) ",  timer_extf, time_fullstep)
+ !call print_timer(iprint,timer_ev%label,  timer_ev,   time_fullstep)
+ !call print_timer(iprint,timer_io%label,  timer_io,   time_fullstep)
 
  dfrac = 1./(timer_lastdump%wall + epsilon(0._4))
  fracinstep = timer_step%wall*dfrac
@@ -829,13 +828,13 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
         hmin_old = min(hmin_old,xyzh_ref(4,i))
      enddo
 
-     if (abs(massoftype(igas) - pmass_ref) < epsilon(pmass_ref)) then
+     if (abs(massoftype(igas) - pmass_ref(1)) < epsilon(pmass_ref(1))) then
         pmass = massoftype(isplit)
      else
         pmass = massoftype(igas)
      endif
      !print*,'masses:', massoftype(igas), massoftype(isplit),pmass,pmass_ref
-     call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref,pmass_ref=pmass_ref,n_ref=n_ref,prefix=prefix)
+     call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref,pmass_ref=pmass_ref(1),n_ref=n_ref,prefix=prefix)
 
      ! calculate hmin_new
      hmin_new = huge(hmin_new)

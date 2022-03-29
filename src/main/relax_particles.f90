@@ -23,18 +23,20 @@ contains
   ! Subroutine to relax the new set of particles to a reference particle distribution
   ! Doesn't care if there's a mix of phases or not
 
-  subroutine relaxparticles(npart,xyzh,npart_ref,xyzh_ref,force_ref)
+  subroutine relaxparticles(npart,xyzh,npart_ref,xyzh_ref,force_ref,pmass_ref,n_toshuffle,to_shuffle)
     use deriv,       only:get_derivs_global
     use part,        only:massoftype,igas
-    integer,           intent(in)    :: npart,npart_ref
+    integer,           intent(in)    :: npart,npart_ref,n_toshuffle
     real,              intent(in)    :: force_ref(3,npart_ref),xyzh_ref(5,npart_ref)
+    real,              intent(in)    :: pmass_ref(npart_ref)
+    integer,           intent(in)    :: to_shuffle(n_toshuffle)
     real,              intent(inout) :: xyzh(:,:)
     real,  allocatable :: a_ref(:,:)
     real :: ke,maxshift
     logical :: converged,write_output
     integer :: ishift,ii,iref,igoal,nshifts
 
-    print*,'Relaxing particles the heavenly way'
+    print*,'Relaxing',n_toshuffle,' particles the heavenly way from',npart_ref,'references.'
 
     ! Initialise for the loop
     converged = .false.
@@ -54,15 +56,14 @@ contains
     ! This gets fxyz of the new particles at their new locations
     call get_derivs_global()
 
-    print*,'Turning',npart_ref,'particles into',npart
     do while (.not.converged)
 
       ! These are the accelerations at the locations of the new particles, interpolated from the parents
-      call get_reference_accelerations(npart,xyzh,a_ref,npart_ref,xyzh_ref,force_ref)
+      call get_reference_accelerations(npart,xyzh,a_ref,npart_ref,xyzh_ref,force_ref,pmass_ref,n_toshuffle,to_shuffle)
 
       ! Shift the particles by minimising the difference between the acceleration at the new particles and
       ! the interpolated values (i.e. what they do have minus what they should have)
-      call shift_particles(npart,xyzh,a_ref,ke,maxshift)
+      call shift_particles(npart,xyzh,a_ref,n_toshuffle,to_shuffle,ke,maxshift)
 
       ! Todo: cut-off criteria
       if (ishift >= nshifts) converged = .true.
@@ -71,6 +72,7 @@ contains
       ! Testing: Write output if required
       if (write_output) write(iref,*) ishift,ke,maxshift
     enddo
+
 
     ! Tidy up
     deallocate(a_ref)
@@ -86,7 +88,7 @@ contains
   !+
   !----------------------------------------------------------------
 
-  subroutine shift_particles(npart,xyzh,a_ref,ke,maxshift)
+  subroutine shift_particles(npart,xyzh,a_ref,n_toshuffle,to_shuffle,ke,maxshift)
     use dim,      only:periodic
     use part,     only: rhoh,vxyzu,fxyzu,massoftype,isplit,igas,iamtype,iphase
     use eos,      only: get_spsound
@@ -94,12 +96,13 @@ contains
     use options,  only:ieos
     use boundary, only:cross_boundary
     use domain,   only:isperiodic
-    integer, intent(in)     :: npart
+    integer, intent(in)     :: npart,n_toshuffle
     real,    intent(inout)  :: xyzh(4,npart)
     real,    intent(in)     :: a_ref(3,npart)
+    integer, intent(in)     :: to_shuffle(n_toshuffle)
     real,    intent(out)    :: ke,maxshift
     real :: hi,rhoi,cs,dti,dx(3),vi(3),err
-    integer :: nlargeshift,i,iamtypei,ncross
+    integer :: nlargeshift,i,iamtypei,ncross,j
 
     ke = 0.
     nlargeshift = 0
@@ -107,10 +110,12 @@ contains
     maxshift = tiny(maxshift)
     !$omp parallel do schedule(guided) default(none) &
     !$omp shared(npart,xyzh,vxyzu,fxyzu,massoftype,ieos,iphase,a_ref,maxshift) &
-    !$omp shared(isperiodic,ncross) &
+    !$omp shared(isperiodic,ncross,to_shuffle,n_toshuffle) &
     !$omp private(i,dx,dti,cs,rhoi,hi,vi,iamtypei,err) &
     !$omp reduction(+:nlargeshift,ke)
-    do i=1,npart
+    do j=1,n_toshuffle
+      if (to_shuffle(j) == 0) cycle
+      i = to_shuffle(j)
       iamtypei = iamtype(iphase(i))
       hi = xyzh(4,i)
       rhoi = rhoh(hi,massoftype(iamtypei))
@@ -151,33 +156,30 @@ contains
   !+
   !----------------------------------------------------------------
 
-  subroutine get_reference_accelerations(npart,xyzh,a_ref,npart_ref,xyzh_ref,force_ref)
+  subroutine get_reference_accelerations(npart,xyzh,a_ref,npart_ref,xyzh_ref,&
+              force_ref,pmass_ref,n_toshuffle,to_shuffle)
     use dim,          only:periodic
     use kernel,       only:wkern,grkern,radkern2,cnormk
     use boundary,     only:dxbound,dybound,dzbound,xmax,xmin,ymax,ymin,zmax,zmin
-    use part,         only:massoftype,rhoh,igas,isplit
-    integer, intent(in) :: npart,npart_ref
-    real,    intent(in) :: xyzh(4,npart),force_ref(3,npart_ref),xyzh_ref(5,npart_ref)
+    use part,         only:massoftype,rhoh,iamtype,iphase
+    integer, intent(in) :: npart,npart_ref,n_toshuffle
+    real,    intent(in) :: xyzh(4,npart),force_ref(3,npart_ref),xyzh_ref(5,npart_ref),pmass_ref(npart_ref)
+    integer, intent(in) :: to_shuffle(n_toshuffle)
     real,    intent(out) :: a_ref(3,npart)
     real :: xi,yi,zi,hi,rij(3),h21,qj2,rij2,rhoj,h31,mass_ref
-    integer :: i,j,iamtypej
+    integer :: i,j,iamtypej,k
 
     a_ref(:,:) = 0.
 
-    ! This needs to be more rigorous
-    if (npart > npart_ref) then
-      mass_ref = massoftype(igas)
-    else
-      mass_ref = massoftype(isplit)
-    endif
-
     !$omp parallel do schedule(guided) default (none) &
-    !$omp shared(xyzh,xyzh_ref,npart,npart_ref,force_ref,a_ref) &
+    !$omp shared(xyzh,xyzh_ref,npart,npart_ref,force_ref,a_ref,pmass_ref,to_shuffle,n_toshuffle) &
     !$omp shared(mass_ref,dxbound,dybound,dzbound) &
     !$omp private(i,j,xi,yi,zi,rij,h21,h31,rhoj,rij2,qj2)
 
     ! Over the new set of particles that are to be shuffled
-    over_new: do i = 1,npart
+    over_new: do k = 1,n_toshuffle
+      if (to_shuffle(k) == 0) cycle over_new
+      i = to_shuffle(k)
       xi = xyzh(1,i)
       yi = xyzh(2,i)
       zi = xyzh(3,i)
@@ -187,6 +189,7 @@ contains
         rij(1) = xyzh_ref(1,j) - xi
         rij(2) = xyzh_ref(2,j) - yi
         rij(3) = xyzh_ref(3,j) - zi
+        mass_ref = pmass_ref(j)
 
         if (periodic) then
           if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
@@ -202,7 +205,7 @@ contains
         qj2  = rij2*h21
         if (qj2 < radkern2) then
           ! Interpolate acceleration at the location of the new particle
-          a_ref(:,i) = a_ref(:,i) + force_ref(:,j)*mass_ref*wkern(qj2,sqrt(qj2))*cnormk*h31/rhoj
+          a_ref(:,i) = a_ref(:,i) + force_ref(:,j)*wkern(qj2,sqrt(qj2))*cnormk*h31/rhoj
         endif
 
       enddo over_reference

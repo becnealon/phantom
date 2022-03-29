@@ -19,6 +19,7 @@ module split
  use options, only:isplitboundary
  use splitmergeutils
  use part, only:igas,ighost,isplit,isplitghost,iamghost,iamsplit,iphase
+ use relax_particles
 
  implicit none
 
@@ -29,7 +30,7 @@ module split
  private
 
  logical :: all_split ! for testing purposes only
- integer, parameter, public  :: nchild = 12
+ integer, parameter, public  :: nchild = 3
  integer, parameter :: nchild_in = nchild + 1
  integer, save      :: children_list(nchild_in) = 0
  ! initialise to 0 to prevent errors when writing to .in file
@@ -88,6 +89,11 @@ call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
 
  if (rand_type==5) then
     call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
+    if (need_to_relax) then
+      call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
+                          force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
+      call shuffle_part(npart)
+    endif
  else
 
 merge_count = 0
@@ -118,6 +124,7 @@ endif
 
  endif ! end if rand_type==5
 
+
 print*,'particle splitting is on, you now have',npart,'total particles'
 print*,'using randomisation type ',rand_type
 
@@ -132,13 +139,13 @@ end subroutine init_split
 subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  use io,       only:fatal
  use part,     only:kill_particle,isdead_or_accreted,shuffle_part,iactive,periodic, &
-                    rhoh,massoftype,igas,isplit,rhoh,gradh
+                    rhoh,massoftype,igas,isplit,rhoh,gradh,iamtype,iphase
  use timestep, only:time
  integer, intent(inout) :: npart,npartoftype(:)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:),fxyzu(:,:)
  logical, intent(inout) :: need_to_relax
- integer                :: i,k,add_npart,oldsplits,oldreals
- logical                :: split_it,ghost_it,already_split,rln
+ integer                :: i,k,add_npart,oldsplits,oldreals,j,m
+ logical                :: split_it,ghost_it,already_split,rln,a_ghost
  logical                :: make_ghost,send_to_list,kill_me,kill_me_now,do_price,do_Whitworth
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
@@ -156,45 +163,23 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
   ! Reset the boundaries depending on time
   oldsplits = npartoftype(isplit)
   oldreals = npartoftype(igas)
-  gzw = 0.
   kill_me = .false.
-  if (.true.) then
-    if ((                  time < 0.2) .or. &
-        (0.4 <= time .and. time < 0.6) .or. &
-        (0.8 <= time .and. time < 1.0) .or. &
-        (1.2 <= time .and. time < 1.4) .or. &
-        (1.6 <= time .and. time < 1.8) ) then
-        splitbox(:) = 0.
-        if (all_split .and. (DJP_eqn13 .or. DJP_eqn17 .or. Hubber_eqn94)) then
-           all_split = .false.
-           !print*, 'calculating density gradient of unsplit particles'
-           !call calc_gradrho(npart,xyzh)
-           xyzh_ref(1:4,1:npart) = xyzh(1:4,1:npart)
-           xyzh_ref(  5,1:npart) = gradh(1,1:npart)
-           n_ref = npart
-           pmass_ref = massoftype(isplit)
-           force_ref(1:3,1:npart) = fxyzu(1:3,1:npart)
-        endif
-    else
-       !kill_me = .true.
-       splitbox(1) =  1.75
-       splitbox(2) =  1.75
-       splitbox(3) = -1.75
-       splitbox(4) = -1.75
-       if (.not. all_split .and. (DJP_eqn13 .or. DJP_eqn17 .or. Hubber_eqn94)) then
-         do i = 1,npart
-             write(100,*) xyzh(1:3,i),rhoh(xyzh(4,i),massoftype(igas))
-          enddo
-          all_split = .true.
-          !print*, 'calculating density gradient of split particles'
-          !call calc_gradrho(npart,xyzh)
-          xyzh_ref(1:4,1:npart) = xyzh(1:4,1:npart)
-          xyzh_ref(  5,1:npart) = gradh(1,1:npart)
-          n_ref = npart
-          pmass_ref = massoftype(igas)
-          force_ref(1:3,1:npart) = fxyzu(1:3,1:npart)
-       endif
+
+  ! Save the reference information and kill the ghosts
+  xyzh_ref(1:4,1:npart) = xyzh(1:4,1:npart)
+  xyzh_ref(  5,1:npart) = gradh(1,1:npart)
+  n_ref = 0
+  do i = 1,npart
+    a_ghost = iamghost(iphase(i))
+    if (.not.a_ghost) then
+      n_ref = n_ref + 1
+      pmass_ref(n_ref) = massoftype(iamtype(iphase(i)))
+      force_ref(1:3,n_ref) = fxyzu(1:3,i)*pmass_ref(n_ref)
+    else if (.not.isdead_or_accreted(xyzh(4,i))) then
+      call kill_particle(i,npartoftype)
     endif
+  enddo
+  call shuffle_part(npart)
 
   if (npartoftype(isplit) /= oldsplits) need_to_relax = .true.
   if (kill_me) then
@@ -202,42 +187,60 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
       write(700,*)i,xyzh(1:4,i),rhoh(xyzh(4,i),massoftype(igas)),massoftype(igas)
     enddo
    endif
- endif
 
  if (rand_type /= 5) then
     call fatal('update_splitting','this routine is set up only for rand_type==5')
     stop
  endif
+ to_shuffle = 0
+ n_toshuffle = 0
+
  !
- !--Kill all active ghost particle  &
  !  Convert gas -> splits that have crossed the boundary
  !
  add_npart = 0
  split_em: do i = 1,npart
     if (iactive(iphase(i)) .and. .not.isdead_or_accreted(xyzh(4,i))) then
-       if (iamghost(iphase(i))) then
-          call kill_particle(i,npartoftype)
-          cycle split_em
-       endif
        call inside_boundary(xyzh(1:3,i),split_it)
+       call inside_ghost_zone(xyzh(1:3,i),ghost_it)
        already_split = iamsplit(iphase(i))
 
        ! is it a big particle that needs to be split?
        if (split_it .and. .not.already_split) then
           call split_a_particle(nchild,i,xyzh,vxyzu,npartoftype,0,1,npart+add_npart)  ! nchild = 12
+          ! Mark these particles for shuffling later
+          n_toshuffle = n_toshuffle + 1
+          to_shuffle(n_toshuffle) = i
+          do j = npart+add_npart+1,npart+add_npart+nchild
+            n_toshuffle = n_toshuffle + 1
+            to_shuffle(n_toshuffle) = j
+          enddo
           add_npart = add_npart + nchild
        endif
+
+       ! is it a big particle that needs splitghosts?
+       if (ghost_it .and. .not.split_it .and. .not.already_split) then
+         call make_split_ghost(npart+add_npart+1,i,npartoftype,npart,nchild,xyzh,vxyzu)
+         ! add these to the shuffle list
+         do m = npart+add_npart+1,npart+add_npart+nchild+1
+           n_toshuffle = n_toshuffle + 1
+           to_shuffle(n_toshuffle) = m
+         enddo
+         add_npart = add_npart + nchild + 1
+       endif
+
    endif
  enddo split_em
  npart = npart + add_npart
  if (add_npart > 0) kill_me_now = .true.
 
- call shuffle_part(npart)
+ call shuffle_part(npart) !note that here we're not loosing any particles, just updating npart really
 
  ! Now go through and collect anything that should go into set_linklist call
  allocate(xyzh_split(4,npart*4))
  allocate(ioriginal(npart*4))
  k = 0
+ j = 0
  add_npart = 0
  make_ghost = .false.
  merge_em: do i = 1,npart
@@ -247,12 +250,8 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
      call inside_ghost_zone(xyzh(1:3,i),ghost_it)
      call inside_boundary(xyzh(1:3,i),split_it)
      already_split = iamsplit(iphase(i))
-
-     ! if it is a merged particle that needs splitghosts, just make these
-     if (ghost_it .and. .not.split_it .and. .not.already_split) then
-       call make_split_ghost(npart+add_npart+1,i,npartoftype,npart,nchild,xyzh,vxyzu)
-       add_npart = add_npart + nchild + 1
-     endif
+     a_ghost = iamghost(iphase(i))
+     if (already_split .and. .not.split_it) j = j + 1
 
      ! if it is a split particle that needs a merged ghost, send to list
     !if (ghost_it .and. split_it .and. already_split) then
@@ -278,9 +277,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  npart = npart + add_npart
  if (add_npart > 0) kill_me_now = .true.
 
- print*, 'make_ghost = ',make_ghost,' using ',k,' particles.'
  if (k > nchild_in) call merge_particles(npart,k,xyzh,xyzh_split(:,1:k),ioriginal,npartoftype,make_ghost)
- call shuffle_part(npart)
 
  deallocate(xyzh_split)
  deallocate(ioriginal)
@@ -296,6 +293,8 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
     enddo
     if (kill_me_now) stop
  endif
+
+ need_to_relax = .true.
 
 end subroutine update_splitting
 
@@ -465,16 +464,17 @@ end subroutine merge_particles_wrapper
 subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftype,make_ghost)
  use linklist,       only:ncells,get_neighbour_list,get_hmaxcell,get_cell_location,set_linklist,ifirstincell
  use kdtree,         only:inodeparts,inoderange
- use part,           only:iactive,isdead_or_accreted,set_particle_type,kill_particle,copy_particle_all
+ use part,           only:iactive,isdead_or_accreted,set_particle_type,kill_particle,copy_particle_all,periodic
  use mpiforce,       only:cellforce
  use io,             only:fatal
- use boundary,       only:dxbound,dybound,xmax,xmin,ymax,ymin
+ use boundary,       only:cross_boundary,dzbound
+ use domain,         only:isperiodic
  integer, intent(inout) :: npartoftype(:),npart
  real,    intent(inout) :: xyzh(:,:),xyzh_split(:,:)
  logical, intent(in)    :: make_ghost
  integer, intent(in)    :: ioriginal(:)
  integer, intent(inout) :: ncandidate  ! needs to be inout to satisfy if MPI, but we can't have pre-processor statements in this .f90 file
- integer                :: i,j,k,icell,jmin,n_cell,iave(4),remainder
+ integer                :: i,j,k,icell,jmin,n_cell,iave(4),remainder,m,ncross
  real                   :: r2,r2min,hmax,hcell
  type(cellforce)        :: cell
  logical                :: ghost_it,split_it
@@ -492,6 +492,8 @@ subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftyp
  iave    = 0
  iave(3) = huge(iave(3))
  hmax    = 0.
+ ncross = 0
+ m = 0
  over_cells: do icell=1,int(ncells)
     i = ifirstincell(icell)
     if (i <= 0) cycle over_cells !--skip empty cells AND inactive cells
@@ -524,10 +526,7 @@ subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftyp
     ! centroid is outside split *and* inside ghost, do both
     k = ioriginal(inodeparts(jmin))
     !  account periodic boundaries
-    if (xyzh(1,k) > xmax) xyzh(1,k) = xyzh(1,k) - dxbound
-    if (xyzh(1,k) < xmin) xyzh(1,k) = xyzh(1,k) + dxbound
-    if (xyzh(2,k) > ymax) xyzh(2,k) = xyzh(2,k) - dybound
-    if (xyzh(2,k) < ymin) xyzh(2,k) = xyzh(2,k) + dybound
+    if (periodic) call cross_boundary(isperiodic,xyzh(:,i),ncross)
 
     call inside_ghost_zone(xyzh(1:3,k),ghost_it)
     call inside_boundary(xyzh(1:3,k),split_it)
@@ -541,8 +540,14 @@ subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftyp
             call set_particle_type(k,igas)
             npartoftype(igas)   = npartoftype(igas)   + 1
             npartoftype(isplit) = npartoftype(isplit) - 1
+            n_toshuffle = n_toshuffle + 1
+            to_shuffle(n_toshuffle)   = k
          else
             call kill_particle(k,npartoftype(:))
+            ! If this particle was already on the to_shuffle list, it needs to be removed
+            do m = 1,n_toshuffle
+              if (to_shuffle(m) == k) to_shuffle(m) = 0
+            enddo
          endif
       enddo
     endif
@@ -559,22 +564,31 @@ subroutine merge_particles(npart,ncandidate,xyzh,xyzh_split,ioriginal,npartoftyp
               xyzh(4,npart) = xyzh(4,k) * nchild_in**(1./3.)
               call set_particle_type(npart,igas)
               npartoftype(igas) = npartoftype(igas) + 1
-          endif
-            ! turn all particles into splitghosts
+              ! add it to the shuffle list
+              n_toshuffle = n_toshuffle + 1
+              to_shuffle(n_toshuffle)   = npart
+          else
+            ! turn all remaining particles into splitghosts
             call set_particle_type(k,isplitghost)
             npartoftype(isplitghost) = npartoftype(isplitghost) + 1
             npartoftype(isplit) = npartoftype(isplit) - 1
+            ! add it to the shuffle list
+            n_toshuffle = n_toshuffle + 1
+            to_shuffle(n_toshuffle)   = k
+          endif
         enddo
       elseif (split_it) then
         ! just need a merged ghost here
         k = ioriginal(inodeparts(jmin))
         npart = npart + 1
         call make_a_ghost(npart,k,npartoftype,npart,nchild_in,xyzh)
+        ! add it to the shuffle list
+        n_toshuffle = n_toshuffle + 1
+        to_shuffle(n_toshuffle)   = k
       endif
     endif
 
  enddo over_cells
- print*, 'min, average, and maximum particles per cell: ',iave(3),float(iave(2))/float(iave(1)),iave(4)
 
 end subroutine merge_particles
 !----------------------------------------------------------------

@@ -25,7 +25,7 @@ contains
 
   subroutine relaxparticles(npart,xyzh,npart_ref,xyzh_ref,force_ref,pmass_ref,n_toshuffle,to_shuffle)
     use deriv,       only:get_derivs_global
-    use part,        only:massoftype,igas
+    use part,        only:massoftype,igas,fxyzu
     integer,           intent(in)    :: npart,npart_ref,n_toshuffle
     real,              intent(in)    :: force_ref(3,npart_ref),xyzh_ref(5,npart_ref)
     real,              intent(in)    :: pmass_ref(npart_ref)
@@ -35,6 +35,8 @@ contains
     real :: ke,maxshift
     logical :: converged,write_output
     integer :: ishift,ii,iref,igoal,nshifts
+
+    if (n_toshuffle == 0) return ! it shouldn't have been called if this was the case
 
     print*,'Relaxing',n_toshuffle,' particles the heavenly way from',npart_ref,'references.'
 
@@ -72,7 +74,6 @@ contains
       ! Testing: Write output if required
       if (write_output) write(iref,*) ishift,ke,maxshift
     enddo
-
 
     ! Tidy up
     deallocate(a_ref)

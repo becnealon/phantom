@@ -849,7 +849,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
  use fastmath,    only:finvsqrt
 #endif
  use kernel,      only:grkern,cnormk,radkern2
- use part,        only:igas,idust,iohm,ihall,iambi,maxphase,iactive,&
+ use part,        only:igas,idust,iohm,ihall,iambi,maxphase,iactive,iamsplit,iamghost,&
                        iamtype,iamdust,get_partinfo,mhd,maxvxyzu,maxdvdx,igasP,ics,iradP,itemp
  use dim,         only:maxalpha,maxp,mhd_nonideal,gravity,gr
  use part,        only:rhoh,dvdx
@@ -918,7 +918,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
  real,            intent(in)    :: rad(:,:),dens(:),metrics(:,:,:,:)
  real,            intent(inout) :: radprop(:,:)
  integer :: j,n,iamtypej
- logical :: iactivej,iamgasj,iamdustj,iamsplitj
+ logical :: iactivej,iamgasj,iamdustj,iamsplitj,iamghostj
  real    :: rij2,q2i,qi,xj,yj,zj,dx,dy,dz,runix,runiy,runiz,rij1,hfacgrkern
  real    :: grkerni,grgrkerni,dvx,dvy,dvz,projv,denij,vsigi,vsigu,dudtdissi
  real    :: projBi,projBj,dBx,dBy,dBz,dB2,projdB
@@ -1148,6 +1148,12 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
 
     j = abs(listneigh(n))
     if ((ignoreself) .and. (i==j)) cycle loop_over_neighbours2
+
+#ifdef SPLITTING
+  iamsplitj = iamsplit(iphase(j)) !!! MAKE THIS NEATER LIKE IN DENS
+  if (iamspliti .and. .not.iamsplitj) cycle loop_over_neighbours2
+  if (.not.iamspliti .and. iamsplitj) cycle loop_over_neighbours2
+#endif
 
     if (ifilledcellcache .and. n <= maxcellcache) then
        ! positions from cache are already mod boundary

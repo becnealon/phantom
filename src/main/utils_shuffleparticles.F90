@@ -26,9 +26,9 @@ module utils_shuffleparticles
  public :: shuffleparticles
 
  ! identifiers for exact profile
- integer, parameter :: iuniform = 1
- integer, parameter :: iarray   = 2
- integer, parameter :: ipart    = 3
+ integer, parameter :: iuniform   = 1
+ integer, parameter :: iarray     = 2
+ integer, parameter :: ireference = 3
  ! additional parameters
  integer, parameter :: maxcellcache = 50000
  integer            :: ncall        =     1  ! to track the number of calls to this subroutine for debugging
@@ -62,15 +62,17 @@ contains
 !-------------------------------------------------------------------
 subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab,rtab,dtab,dcontrast, &
                             xyzh_ref,pmass_ref,n_ref,is_setup,prefix)
- use dim,          only:maxneigh,maxp_hard
- use part,         only:vxyzu,divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind
+ use io,           only:id,master,fatal
+ use dim,          only:maxneigh,maxp_hard,maxp,ncellsmax
+ use part,         only:vxyzu,divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind,iphase,igas
  use part,         only:gradh,rad,radprop,dvdx,rhoh,hrho
  use densityforce, only:densityiterate
- use linklist,     only:ncells,ifirstincell,set_linklist,get_neighbour_list,allocate_linklist
+ use linklist,     only:ncells,ifirstincell,set_linklist,get_neighbour_list,allocate_linklist,listneigh
  use kernel,       only:cnormk,wkern,grkern,radkern2
  use boundary,     only:dxbound,dybound,dzbound,cross_boundary
  use kdtree,       only:inodeparts,inoderange
  use domain,       only:isperiodic
+ use allocutils,   only:allocate_array
  integer,           intent(in)    :: iprint,npart
  real,              intent(in)    :: pmass
  real,              intent(inout) :: xyzh(:,:)
@@ -80,25 +82,28 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  real,    optional, intent(inout) :: xyzh_ref(:,:)
  logical, optional, intent(in)    :: is_setup
  character(len=*) , optional, intent(in)    :: prefix
- integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross,nlink
- integer,save :: listneigh(maxneigh)
+ integer      :: i,j,k,jm1,p,ip,icell,ineigh,idebug,ishift,nshiftmax,iprofile,nparterr,nneigh,ncross,nlink,n_part
  real         :: stressmax,rmin,rmax,dr,dr1,dedge,dmed
- real         :: max_shift2,max_shift_thresh,max_shift_thresh2,link_shift,link_shift_thresh
+ real         :: max_shift2,max_shift_thresh,max_shift_thresh2,link_shift,link_shift_thresh,radkern12
  real         :: xi,yi,zi,hi,hi12,hi14,radi,coefi,rhoi,rhoi1,rij2,qi2,qj2,denom,rhoe,drhoe,err
+ real         :: xj,yj,zj,hj,hj1,termi,grkernij(3)
  real         :: maggradi,maggrade,magshift,rinner,router,gradhi,gradhj
  real         :: dx_shift(3,npart),rij(3),runi(3),grrhoonrhoe(3),grrhoonrhoi(3),signg(3)
  real         :: errmin(3,2),errmax(3,2),errave(3,2),stddev(2,2),rtwelve(12),rnine(9),totalshift(3,npart)
- real         :: twoh21,kernsum,grrhoonrhoe_ref(3,maxp_hard)
+ real         :: twoh21,kernsum
+#ifdef SPLITTING
+ real         :: grrhoonrhoe_ref(3,maxp_hard)
+#endif
  real,save    :: xyzcache(maxcellcache,4)
  real,save    :: xyzcache_ref(maxcellcache,4)
- logical      :: shuffle,at_interface,use_ref_h,call_linklist
+ logical      :: shuffle,at_interface,use_ref_h,call_linklist,is_ref
  character(len=128) :: prefix0,fmt1,fmt2,fmt3
- !$omp threadprivate(xyzcache,xyzcache_ref,listneigh)
+ !$omp threadprivate(xyzcache,xyzcache_ref)
 
  !--Initialise free parameters
- idebug            =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2); 4=print every step with gradients + (3)
- nshiftmax         =  200  ! maximum number of shuffles/iterations
- max_shift_thresh  = 0. ! will stop shuffling once (maximum shift)/h is less than this value
+ idebug            =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2)
+ nshiftmax         =  200 !600 ! maximum number of shuffles/iterations
+ max_shift_thresh  = 0. !4.d-3 ! will stop shuffling once (maximum shift)/h is less than this value
  link_shift_thresh = 0.01  ! will recalculate the link list when the cumulative maximum relative shift surpasses this limit (=0 will call every loop)
  !--Initialise remaining parameters
  rnine             = 0.
@@ -106,9 +111,12 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
  use_ref_h         = .true. ! to prevent compiler warnings
  call_linklist     = .true.
  max_shift_thresh2 = max_shift_thresh*max_shift_thresh
+ n_part            = npart
+ is_ref            = .false.
+ radkern12         = 1.0/radkern2
 
  !--Determine what has been passed in
- if (idebug > 0) then
+ if (idebug > 0 .and. id==master) then
     write(fmt1,'(a)') '(1x,a)'
     write(fmt2,'(a)') '(1x,a,I8)'
     write(fmt3,'(a)') '(1x,a,Es18.6)'
@@ -123,6 +131,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     if (present(pmass_ref)) write(iprint,fmt3) 'Shuffling: optional variable is present: pmass_ref: ',pmass_ref
     if (present(n_ref))     write(iprint,fmt2) 'Shuffling: optional variable is present: n_ref: ',n_ref
     if (present(is_setup))  write(iprint,fmt1) 'Shuffling: optional variable is present: is_setup'
+    write(iprint,fmt2) 'Shuffling: non-optional variable npart = ',npart
  endif
 
  !--Determine the exact profile
@@ -139,7 +148,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     rmax     = rsphere + hrho(dsphere,pmass)
     rinner   = rsphere - 4.*hrho(dsphere,pmass)
     router   = rsphere + 4.*hrho(dsphere,pmass)
-    write(iprint,'(1x,a)') 'Shuffling: Shuffling to a uniform sphere-in-box profile'
+    if (id==master) write(iprint,'(1x,a)') 'Shuffling: Shuffling to a uniform sphere-in-box profile'
  elseif (present(ntab) .and. present(rtab) .and. present(dtab) .and. present(dmedium) .and. present(dcontrast)) then
     iprofile = iarray
     dedge    = dmedium*dcontrast
@@ -159,46 +168,56 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        rinner   = rtab(ntab) - 2.*hrho(dedge,pmass)
        router   = rtab(ntab) + 6.*hrho(dedge,pmass)
     endif
-    write(iprint,'(1x,a)') 'Shuffling: Shuffling to non-uniform sphere-in-box profile (eg a BE sphere in a background medium)'
+    if (id==master) then
+       write(iprint,'(1x,2a)') 'Shuffling: Shuffling to non-uniform sphere-in-box profile',&
+                               ' (e.g., a BE sphere in a background medium)'
+    endif
  elseif (present(ntab) .and. present(rtab) .and. present(dtab)) then
     iprofile = iarray
     rmin     = 2.0*rtab(ntab) ! setting to a large value to be always called
     rmax     = 2.0*rtab(ntab) ! setting to a large value that will never be called
-    write(iprint,*) 'Shuffling to a non-uniform sphere'
-    write(iprint,*) 'This is untested without a background, so aborting until properly tested'
+    if (id==master) then
+       write(iprint,*) 'Shuffling to a non-uniform sphere'
+       write(iprint,*) 'This is untested without a background, so aborting until properly tested'
+    endif
     return
  elseif (present(xyzh_ref) .and. present(pmass_ref) .and. present(n_ref)) then
-    iprofile = ipart
+    iprofile = ireference
     if (pmass > pmass_ref) then
        use_ref_h = .true.
     else
        use_ref_h = .false.
     endif
-    write(iprint,'(1x,a)') 'Shuffling: Shuffling to a reference array'
+    if (id==master) write(iprint,'(1x,a)') 'Shuffling: Shuffling to a reference array'
 #ifdef SPLITTING
+    !--Ensure maxp_hard is large enough to linklist the primary & reference simultansously
+    n_part = npart + n_ref
+    if (n_part > maxp_hard) call fatal('shuffling','npart + n_ref > maxp_hard',var='n_part',ival=n_part)
+
     !--Calculate grad rho / rho for the reference particles
     call set_linklist(n_ref,n_ref,xyzh_ref(1:4,:),vxyzu)
 
     grrhoonrhoe_ref = 0.
-!$omp parallel do default (none) &
+!$omp parallel default (none) &
 !$omp shared(xyzh_ref,pmass_ref,grrhoonrhoe_ref,n_ref) &
 !$omp shared(inodeparts,inoderange,ifirstincell,ncells) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
 #endif
-!$omp private(i,j,k,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi1) &
+!$omp private(i,j,k,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi1,termi,grkernij) &
 !$omp private(icell,ineigh,ip,nneigh,denom,gradhi,gradhj)
-    over_pcells: do icell=1,int(ncells)
+!$omp do schedule(runtime)
+    over_ref_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
 
        ! Skip empty cells AND inactive cells
-       if (k <= 0) cycle over_pcells
+       if (k <= 0) cycle over_ref_cells
 
        ! Get the neighbour list and fill the cell cache
        call get_neighbour_list(icell,listneigh,nneigh,xyzh_ref(1:4,:),xyzcache_ref,maxcellcache,getj=.true.)
 
        ! Loop over particles in the cell
-       over_pparts: do ip = inoderange(1,icell),inoderange(2,icell)
+       over_ref_parts: do ip = inoderange(1,icell),inoderange(2,icell)
           i  = inodeparts(ip)
           xi = xyzh_ref(1,i)
           yi = xyzh_ref(2,i)
@@ -208,10 +227,11 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           hi12   = 1.0/(hi*hi)
           hi14   = hi12*hi12
           rhoi1  = 1.0/rhoh(hi,pmass_ref)
+          termi  = cnormk*gradhi*hi14*rhoi1
 
-          over_pneighbours: do ineigh = 1,nneigh
+          over_ref_neighbours: do ineigh = 1,nneigh
              j = abs(listneigh(ineigh))
-             if (i==j) cycle over_pneighbours
+             if (i==j) cycle over_ref_neighbours
 
              rij(1) = xyzh_ref(1,j) - xi
              rij(2) = xyzh_ref(2,j) - yi
@@ -224,24 +244,33 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
              if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
 #endif
              rij2 = dot_product(rij,rij)
-             runi = rij/sqrt(rij2)
              qi2  = rij2*hi12
              qj2  = rij2/xyzh_ref(4,j)**2
-             if (qi2 < radkern2) then
-                grrhoonrhoe_ref(:,i) = grrhoonrhoe_ref(:,i) - runi*grkern(qi2,sqrt(qi2))*cnormk*gradhi*hi14*rhoi1
+             if (qi2 < radkern2 .or. qj2 < radkern2) then
+                grkernij = rij/sqrt(rij2)*grkern(qi2,sqrt(qi2))
+                if (qi2 < radkern2) then
+                   grrhoonrhoe_ref(:,i) = grrhoonrhoe_ref(:,i) - grkernij*termi
+                endif
+                if (qj2 < radkern2) then
+                   denom = xyzh_ref(4,j)**4 * rhoh(xyzh_ref(4,j),pmass_ref)
+                   grrhoonrhoe_ref(:,i) = grrhoonrhoe_ref(:,i) - grkernij*cnormk*gradhj/denom
+                endif
              endif
-             if (qj2 < radkern2) then
-                denom = xyzh_ref(4,j)**4 * rhoh(xyzh_ref(4,j),pmass_ref)
-                grrhoonrhoe_ref(:,i) = grrhoonrhoe_ref(:,i) - runi*grkern(qj2,sqrt(qj2))*cnormk*gradhj/denom
-             endif
-          enddo over_pneighbours
+          enddo over_ref_neighbours
           grrhoonrhoe_ref(:,i) = pmass_ref*grrhoonrhoe_ref(:,i)
-       enddo over_pparts
-    enddo over_pcells
-!$omp end parallel do
+       enddo over_ref_parts
+    enddo over_ref_cells
+!$omp enddo
+!$omp end parallel
+#else
+    call fatal('shuffling','SPLITTING==yes is required for iprofile == ireference')
 #endif
+    !--Append the following arrays with the reference particles for linking
+    xyzh(:,npart+1:n_part) = xyzh_ref(:,1:n_ref)
+    xyzh(4,npart+1:n_part) = epsilon(xyzh(4,1))
+    iphase(npart+1:n_part) = igas                ! don't really care what this value is, just can't be zero
  else
-    write(iprint,'(1x,a)') 'Shuffling: Density profile undefined.  Aborting.'
+    if (id==master) write(iprint,'(1x,a)') 'Shuffling: Density profile undefined.  Aborting.'
     return
  endif
  dr = rmax - rmin
@@ -266,7 +295,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           endif
        endif
        open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat')
-       if (iprofile/=ipart) then
+       if (iprofile/=ireference) then
           open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat')
           p = 335
        else
@@ -303,7 +332,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        endif
        open(unit=334,file=trim(prefix0)//'shuffling_error_all.dat',position='append')
        write(334,'(a)') ' '
-       if (iprofile/=ipart) then
+       if (iprofile/=ireference) then
           open(unit=335,file=trim(prefix0)//'shuffling_error_notinterface.dat',position='append')
           write(335,'(a)') ' '
        endif
@@ -323,13 +352,16 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 
  do while (shuffle .and. ishift < nshiftmax)
     ! update densities
-    if (call_linklist) then
+    if (call_linklist .or. iprofile==ireference) then
        call set_linklist(npart,npart,xyzh,vxyzu)
        nlink      = nlink + 1
        link_shift = 0.
     endif
     call densityiterate(2,npart,npart,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
                                fxyzu,fext,alphaind,gradh,rad,radprop,dvdx)
+    if (iprofile==ireference) then
+       call set_linklist(n_part,n_part,xyzh,vxyzu)
+    endif
 
     ! initialise variables for this loop
     dx_shift   = 0.
@@ -339,22 +371,26 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     stddev     = 0.
     nparterr   = 0
     max_shift2 = 0.
+    radi       = 0.
 
     ! determine how much to shift by
-!$omp parallel do default (none) &
+!$omp parallel default (none) &
 !$omp shared(xyzh,npart,pmass,dx_shift,gradh,max_shift_thresh2,rmin,rmax,iprofile,dedge,dmed,dr1,idebug) &
-!$omp shared(use_ref_h,n_ref,xyzh_ref,grrhoonrhoe_ref,totalshift,pmass_ref) &
+!$omp shared(use_ref_h,n_ref,xyzh_ref,grrhoonrhoe_ref,totalshift,pmass_ref,radkern12) &
 !$omp shared(rtab,dtab,ntab,rinner,router,inodeparts,inoderange,ifirstincell,ncells,ncall) &
 #ifdef PERIODIC
 !$omp shared(dxbound,dybound,dzbound) &
 #endif
-!$omp private(i,j,k,ip,ineigh,icell,jm1,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi,rhoi1,radi,coefi) &
+!$omp private(i,j,k,ip,ineigh,icell,jm1,xi,yi,zi,hi,hi12,rij,rij2,runi,qi2,qj2,hi14,rhoi,rhoi1,coefi) &
+!$omp private(xj,yj,zj,hj,hj1,termi,grkernij) &
 !$omp private(grrhoonrhoe,grrhoonrhoi,signg,rhoe,drhoe,denom,nneigh) &
 !$omp private(err,maggradi,maggrade,magshift,at_interface) &
-!$omp private(twoh21,kernsum) & ! unique to splitting
+!$omp private(twoh21,kernsum) &
+!$omp firstprivate(is_ref,radi) &
 !$omp reduction(min: errmin) &
 !$omp reduction(max: errmax,max_shift2) &
 !$omp reduction(+:   errave,stddev,nparterr)
+!$omp do schedule(runtime)
     over_cells: do icell=1,int(ncells)
        k = ifirstincell(icell)
 
@@ -367,26 +403,55 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        ! Loop over particles in the cell
        over_parts: do ip = inoderange(1,icell),inoderange(2,icell)
           i  = inodeparts(ip)
+          if (i > npart) cycle over_parts ! skip reference particles; guaranteed to be false if not splitting
           xi = xyzh(1,i)
           yi = xyzh(2,i)
           zi = xyzh(3,i)
           hi = xyzh(4,i)
-          hi12  = 1.0/(hi*hi)
-          hi14  = hi12*hi12
-          rhoi  = rhoh(hi,pmass)
-          rhoi1 = 1.0/rhoi
-          radi  = sqrt(xi*xi + yi*yi + zi*zi)
-          coefi = 0.25*hi*hi
-          grrhoonrhoi = 0.
+          hi12   = 1.0/(hi*hi)
+          hi14   = hi12*hi12
+          twoh21 = hi12*radkern12
+          rhoi   = rhoh(hi,pmass)
+          rhoi1  = 1.0/rhoi
+          termi  = cnormk*gradh(1,i)*hi14*rhoi1
+          coefi  = 0.25*hi*hi
+          grrhoonrhoi = 0.0
+          grrhoonrhoe = 0.0
+          drhoe       = 0.0
+          rhoe        = 0.0
+          kernsum     = 0.0
 
           ! calculate (grad rho) / rho for particle i
           over_neighbours: do ineigh = 1,nneigh
              j = abs(listneigh(ineigh))
              if (i==j) cycle over_neighbours
+             if (iprofile==ireference) then
+                ! determine if primary or reference particle
+                if (j > npart) then
+                   is_ref = .true.
+                else
+                   is_ref = .false.
+                endif
+             endif
 
-             rij(1) = xyzh(1,j) - xi
-             rij(2) = xyzh(2,j) - yi
-             rij(3) = xyzh(3,j) - zi
+             if (.true. .and. ineigh <= maxcellcache) then
+                ! positions from cache are already mod boundary
+                xj  = xyzcache(ineigh,1)
+                yj  = xyzcache(ineigh,2)
+                zj  = xyzcache(ineigh,3)
+                hj1 = xyzcache(ineigh,4)
+                hj  = 1./hj1
+             else
+                xj  = xyzh(1,j)
+                yj  = xyzh(2,j)
+                zj  = xyzh(3,j)
+                hj  = xyzh(4,j)
+                hj1 = 1./hj
+             endif
+
+             rij(1) = xj - xi
+             rij(2) = yj - yi
+             rij(3) = zj - zi
 #ifdef PERIODIC
              if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
              if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
@@ -394,53 +459,46 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
 #endif
              rij2 = dot_product(rij,rij)
              if (rij2 < epsilon(rij2)) then
-                if (idebug > 0) print*, 'pairing may be occurring between ', i, j
+                if (idebug > 0 .and. .not.is_ref) print*, 'pairing may be occurring between ', i, j
                 cycle
              endif
-             runi = rij/sqrt(rij2)
-             qi2  = rij2*hi12
-             qj2  = rij2/xyzh(4,j)**2
-             if (qi2 < radkern2) then
-                grrhoonrhoi = grrhoonrhoi - runi*grkern(qi2,sqrt(qi2))*cnormk*gradh(1,i)*hi14*rhoi1
-             endif
-             if (qj2 < radkern2) then
-                denom = xyzh(4,j)**4 * rhoh(xyzh(4,j),pmass)
-                grrhoonrhoi = grrhoonrhoi - runi*grkern(qj2,sqrt(qj2))*cnormk*gradh(1,j)/denom
+
+             if (is_ref) then
+                ! This is for splitting only!
+                ! Determine the kernel-weighted average grad rho / rho for the reference distribution
+                if (use_ref_h) twoh21 = radkern12/xyzh_ref(4,j-npart)**2
+                qi2 = rij2*twoh21
+                if (qi2 < radkern2) then
+                   grrhoonrhoe = grrhoonrhoe - grrhoonrhoe_ref(:,j-npart)*wkern(qi2,sqrt(qi2))
+                   kernsum     = kernsum + wkern(qi2,sqrt(qi2))
+                endif
+             else
+                ! Calculate (grad rho)/rho of the primary particle type
+                qi2 = rij2*hi12
+                qj2 = rij2/hj**2
+                if (qi2 < radkern2 .or. qj2 < radkern2) then
+                   grkernij = rij/sqrt(rij2)*grkern(qi2,sqrt(qi2))
+                   if (qi2 < radkern2) then
+                      grrhoonrhoi = grrhoonrhoi - grkernij*termi
+                   endif
+                   if (qj2 < radkern2) then
+                      denom = hj**4 * rhoh(hj,pmass)
+                      grrhoonrhoi = grrhoonrhoi - grkernij*cnormk*gradh(1,j)/denom
+                   endif
+                endif
              endif
           enddo over_neighbours
 
           ! calculate the exact (grad rho) / rho
-          grrhoonrhoe = 0.0
-          drhoe       = 0.0
-          rhoe        = 0.0
-          if (iprofile==ipart) then
-             ! determine the kernel-weighted average grad rho / rho for the reference distribution
-             ! need to make this more efficient
-             twoh21  = 1./(2.0*xyzh(4,i))**2
-             kernsum = 0.
-             over_refs: do j = 1,n_ref
-                rij(1) = xyzh_ref(1,j) - xi
-                rij(2) = xyzh_ref(2,j) - yi
-                rij(3) = xyzh_ref(3,j) - zi
-                if (use_ref_h) twoh21 = 1./(2.0*xyzh_ref(4,j))**2
-#ifdef PERIODIC
-                if (abs(rij(1)) > 0.5*dxbound) rij(1) = rij(1) - dxbound*SIGN(1.0,rij(1))
-                if (abs(rij(2)) > 0.5*dybound) rij(2) = rij(2) - dybound*SIGN(1.0,rij(2))
-                if (abs(rij(3)) > 0.5*dzbound) rij(3) = rij(3) - dzbound*SIGN(1.0,rij(3))
-#endif
-                rij2 = dot_product(rij,rij)
-                qi2  = rij2*twoh21
-                if (qi2 < radkern2) then
-                   grrhoonrhoe = grrhoonrhoe - grrhoonrhoe_ref(:,j)*wkern(qi2,sqrt(qi2))
-                   kernsum     = kernsum + wkern(qi2,sqrt(qi2))
-                endif
-             enddo over_refs
+          if (iprofile==ireference) then
+             ! Finalise calculation for splitting
              if (kernsum > 0.) then
                 grrhoonrhoe = grrhoonrhoe/kernsum
              else
                 print*, 'Shuffling: WARNING! No neighbours when determining reference value!'
              endif
           else
+             radi = sqrt(xi*xi + yi*yi + zi*zi)
              if (radi < rmin) then
                 if (iprofile==iuniform) then
                    rhoe = dedge
@@ -474,7 +532,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           grrhoonrhoi  = coefi*pmass*grrhoonrhoi   ! multiply in the correct coefficients for the i'th particle
           grrhoonrhoe  = coefi      *grrhoonrhoe   ! multiply in the correct coefficients for the exact value
           signg        = 1.0                       ! determine whether to add or subtract the terms
-          if (iprofile/=ipart) then
+          if (iprofile/=ireference) then
              if (xi*grrhoonrhoi(1) > xi*grrhoonrhoe(1)) signg(1) = -1.0
              if (yi*grrhoonrhoi(2) > yi*grrhoonrhoe(2)) signg(2) = -1.0
              if (zi*grrhoonrhoi(3) > zi*grrhoonrhoe(3)) signg(3) = -1.0
@@ -485,11 +543,11 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
           magshift        = dot_product(dx_shift(1:3,i),dx_shift(1:3,i))
           if (magshift > 0.25*hi*hi) dx_shift(:,i) = 0.5*hi*dx_shift(:,i)/sqrt(magshift)
           max_shift2      = max(max_shift2,magshift*hi12) ! metric to track for exiting loop
-          totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
 
           ! debugging statements
           if (idebug > 0) then
-             if (radi < rinner .or. radi > router .or. iprofile==ipart) then
+             if (idebug > 0) totalshift(:,i) = totalshift(:,i) - dx_shift(:,i)
+             if (radi < rinner .or. radi > router .or. iprofile==ireference) then
                 at_interface = .false.
                 nparterr     = nparterr + 1
              else
@@ -538,16 +596,11 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                 stddev(1,2) = stddev(1,2) + (rhoe - rhoi)**2
                 stddev(2,2) = stddev(2,2) + (maggrade - maggradi)**2
              endif
-             if (idebug == 4) then
-!$omp critical
-                write(333,'(I18,1x,16(es18.10,1x),I18)') i,xyzh(1:3,i),rhoh(hi,pmass),&
-                dx_shift(:,i),grrhoonrhoi,grrhoonrhoe,magshift,maggradi,maggrade,ncall
-!$omp end critical
-             endif
           endif
        enddo over_parts
     enddo over_cells
-!$omp end parallel do
+!$omp enddo
+!$omp end parallel
 
     ! shift particles
     xyzh(1:3,1:npart) = xyzh(1:3,1:npart) - dx_shift(:,1:npart)
@@ -562,7 +615,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
                           ,errmin(2,1),errave(2,1)/npart,errmax(2,1) &
                           ,errmin(3,1),errave(3,1)/npart,errmax(3,1) &
                           ,stddev(1:2,1),ncall
-       if (iprofile/=ipart) then
+       if (iprofile/=ireference) then
           write(335,'(I18,1x,11(es18.10,1x),I18)') ishift &
                           ,errmin(1,2),errave(1,2)/nparterr,errmax(1,2) &
                           ,errmin(2,2),errave(2,2)/nparterr,errmax(2,2) &
@@ -609,11 +662,13 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
     call cross_boundary(isperiodic,xyzh(:,i),ncross)
  enddo
 !$omp end parallel do
- if (idebug > 0 .and. ncross > 0) write(iprint,'(1x,a,I6)') 'Shuffling: number of particles that cross the boundary: ',ncross
+ if (idebug > 0 .and. ncross > 0 .and. id==master) then
+    write(iprint,'(1x,a,I6)') 'Shuffling: number of particles that cross the boundary: ',ncross
+ endif
 #endif
 
  ! final debugging print-statements
- if (idebug > 0) then
+ if (idebug > 0 .and. id==master) then
     if (idebug > 1) then
        do i = 1,npart
           write(332,'(I18,1x,7(es18.10,1x),I18)') i,xyzh(1:4,i),totalshift(1:3,i),ncall
@@ -627,10 +682,12 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,rsphere,dsphere,dmedium,ntab
        endif
     endif
     close(334)
-    if (iprofile /= ipart) close(335)
+    if (iprofile /= ireference) close(335)
  endif
- write(iprint,'(1x,3(a,I6),a,es18.10)') 'Shuffling: completed with ',ishift,' iterations on call number ',ncall, &
-                                        ' with ',nlink,' calls to linklist and max shift of ',sqrt(max_shift2)
+ if (id==master) then
+    write(iprint,'(1x,3(a,I6),a,es18.10)') 'Shuffling: completed with ',ishift,' iterations on call number ',ncall, &
+                                           ' with ',nlink,' calls to linklist and max shift of ',sqrt(max_shift2)
+ endif
  ncall = ncall + 1
 
 end subroutine shuffleparticles

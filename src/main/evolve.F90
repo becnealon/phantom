@@ -683,7 +683,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   use utils_shuffleparticles, only:shuffleparticles
   real, intent(inout) :: xyzh(:,:),vxyzu(:,:),h0(:)
   real, intent(in)    :: rho_ref,time
-  integer, intent(in) :: npart
+  integer, intent(inout) :: npart
   character(len=*), intent(in) :: prefix
   real :: stressmax,mu,dmu,beta,xyzh_refi(4,npart),shifts(3,npart),rho_ave,pmass
   real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,rad2

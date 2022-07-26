@@ -63,7 +63,7 @@ subroutine init_split(ierr)
  character(len=40) :: prefix
  real :: pmass
 
- accelerations = .true.
+ accelerations = .false.
  prefix = 'mahtest' ! this is only for testing
 
  if ((Hubber_eqn94 .and. DJP_eqn17) .or. (DJP_eqn17 .and. DJP_eqn13) .or. (DJP_eqn13 .and. Hubber_eqn94) ) then
@@ -111,8 +111,9 @@ call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
          pmass = massoftype(igas)
       endif
 
-      call shuffle_part(npart)
-      call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref(:,1:n_ref),pmass_ref=pmass_ref(1),n_ref=n_ref,prefix=prefix)
+      !call shuffle_part(npart)
+      call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref(:,1:n_ref), &
+      pmass_ref=pmass_ref,n_ref=n_ref,n_toshuffle=n_toshuffle,to_shuffle=to_shuffle(1:n_toshuffle),prefix=prefix)
     endif
  else
 
@@ -165,7 +166,7 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  real,    intent(inout) :: xyzh(:,:),vxyzu(:,:),fxyzu(:,:)
  logical, intent(inout) :: need_to_relax
  integer                :: i,k,add_npart,oldsplits,oldreals,j,m
- logical                :: split_it,ghost_it,already_split,rln,a_ghost,splitwave_testing
+ logical                :: split_it,ghost_it,already_split,a_ghost,splitwave_testing
  logical                :: make_ghost,send_to_list,kill_me,kill_me_now,do_price,do_Whitworth
  integer, allocatable, dimension(:)   :: ioriginal(:)
  real,    allocatable, dimension(:,:) :: xyzh_split(:,:)
@@ -174,7 +175,6 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  character(len=40) :: split_shuffle_type,split_error_metric_type
  character(len=40) :: merge_shuffle_type,merge_error_metric_type
 
- rln = .false.
  need_to_relax = .false.
  oldsplits = npartoftype(isplit)
  oldreals = npartoftype(igas)
@@ -323,8 +323,6 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
  if (n_toshuffle > 0) need_to_relax = .true.
 
  if (periodic) call shift_for_periodicity(npart,xyzh)
-
- need_to_relax = .true.
 
  ! Quick checks to make sure we haven't accidentally changed the total mass
  k = modulo(npartoftype(isplitghost),nchild_in)

@@ -242,10 +242,11 @@ subroutine evol(infile,logfile,evfile,dumpfile)
   call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
   if (need_to_relax) then
     ! accelerations method
-    call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
-                        force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
+    !call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
+    !                    force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
     ! grad rho/rho method
-    !call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix)
+    !
+    call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix,n_toshuffle,to_shuffle(1:n_toshuffle))
   endif
   call shuffle_part(npart)
 #endif
@@ -664,7 +665,8 @@ end subroutine print_timinginfo
 !  (this will need to be re-written into other routines)
 !+
 !----------------------------------------------------------------
-subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
+subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix, &
+                  n_toshuffle,to_shuffle)
   use dim,  only: maxp_hard
   use io,   only: fatal,iprint
   use part, only: divcurlv,divcurlB,Bevol,fxyzu,fext,alphaind,iphase
@@ -685,6 +687,7 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
   real, intent(in)    :: rho_ref,time
   integer, intent(inout) :: npart
   character(len=*), intent(in) :: prefix
+  integer, intent(in) :: n_toshuffle,to_shuffle(:)
   real :: stressmax,mu,dmu,beta,xyzh_refi(4,npart),shifts(3,npart),rho_ave,pmass
   real :: beta_a,beta_b,beta_c,beta_d,rho_a,rho_b,rho_c,rho_d,rad2
   real :: scoef,xi,yi,zi,hi,twoh2,qi2,qj2,hi12,rhoe,denom,rij2,rhoi1
@@ -834,7 +837,8 @@ subroutine relax_by_shuffling(xyzh,h0,vxyzu,npart,rho_ref,time,prefix)
         pmass = massoftype(igas)
      endif
      !print*,'masses:', massoftype(igas), massoftype(isplit),pmass,pmass_ref
-     call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref,pmass_ref=pmass_ref(1),n_ref=n_ref,prefix=prefix)
+     call shuffleparticles(iprint,npart,xyzh,pmass,xyzh_ref=xyzh_ref,pmass_ref=pmass_ref, &
+            n_ref=n_ref,n_toshuffle=n_toshuffle,to_shuffle=to_shuffle(1:n_toshuffle),prefix=prefix)
 
      ! calculate hmin_new
      hmin_new = huge(hmin_new)

@@ -56,6 +56,7 @@ subroutine init_split(ierr)
  use dim, only:maxp_hard
  use io,  only:iprint
  use utils_shuffleparticles, only:shuffleparticles
+ use deriv,       only:get_derivs_global
  integer, intent(inout) :: ierr
  integer :: ii,merge_count,merge_ghost_count,add_npart
  integer(kind=1) :: iphaseii
@@ -63,7 +64,7 @@ subroutine init_split(ierr)
  character(len=40) :: prefix
  real :: pmass
 
- accelerations = .false.
+ accelerations = .true.
  prefix = 'mahtest' ! this is only for testing
 
  if ((Hubber_eqn94 .and. DJP_eqn17) .or. (DJP_eqn17 .and. DJP_eqn13) .or. (DJP_eqn13 .and. Hubber_eqn94) ) then
@@ -96,10 +97,12 @@ call delete_all_ghosts(xyzh,vxyzu,npartoftype,npart)
 
  if (rand_type==5) then
    if (accelerations) then
+     ! This gets fxyz of the new particles at their new locations
+     call get_derivs_global()
      call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
      if (need_to_relax) then
        call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
-                            force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
+                            force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:n_toshuffle))
      endif
     call shuffle_part(npart)
     else
@@ -202,15 +205,16 @@ subroutine update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
   endif
 
   ! Save the reference information and kill the ghosts
-  xyzh_ref(1:4,1:npart) = xyzh(1:4,1:npart)
-  xyzh_ref(  5,1:npart) = gradh(1,1:npart)
   n_ref = 0
+  xyzh_ref = 0.
   force_ref = 0.
   pmass_ref = 0.
   do i = 1,npart
     a_ghost = iamghost(iphase(i))
     if (.not.a_ghost) then
       n_ref = n_ref + 1
+      xyzh_ref(1:4,n_ref) = xyzh(1:4,i)
+      xyzh_ref(5,n_ref)   = gradh(1,i)
       pmass_ref(n_ref) = massoftype(iamtype(iphase(i)))
       force_ref(1:3,n_ref) = fxyzu(1:3,i)*pmass_ref(n_ref)
     else if (.not.isdead_or_accreted(xyzh(4,i))) then

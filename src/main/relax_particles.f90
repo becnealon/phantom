@@ -25,15 +25,15 @@ contains
 
   subroutine relaxparticles(npart,xyzh,npart_ref,xyzh_ref,force_ref,pmass_ref,n_toshuffle,to_shuffle)
     use deriv,       only:get_derivs_global
-    use part,        only:massoftype,igas,fxyzu
+    use part,        only:massoftype,igas,fxyzu,isplit,iphase,iamghost
     integer,           intent(in)    :: npart,npart_ref,n_toshuffle
     real,              intent(in)    :: force_ref(3,npart_ref),xyzh_ref(5,npart_ref)
     real,              intent(in)    :: pmass_ref(npart_ref)
     integer,           intent(in)    :: to_shuffle(n_toshuffle)
     real,              intent(inout) :: xyzh(:,:)
     real,  allocatable :: a_ref(:,:)
-    real :: ke,maxshift
-    logical :: converged,write_output
+    real :: ke,maxshift,pmassi
+    logical :: converged,write_output,a_ghost
     integer :: ishift,ii,iref,igoal,nshifts
 
     if (n_toshuffle == 0) return ! it shouldn't have been called if this was the case
@@ -71,8 +71,6 @@ contains
       if (ishift >= nshifts) converged = .true.
       ishift = ishift + 1
 
-      ! Testing: Write output if required
-      if (write_output) write(iref,*) ishift,ke,maxshift
     enddo
 
     ! Tidy up
@@ -158,7 +156,7 @@ contains
   !----------------------------------------------------------------
 
   subroutine get_reference_accelerations(npart,xyzh,a_ref,npart_ref,xyzh_ref,&
-              force_ref,pmass_ref,n_toshuffle,to_shuffle)
+    force_ref,pmass_ref,n_toshuffle,to_shuffle)
     use dim,          only:periodic
     use kernel,       only:wkern,grkern,radkern2,cnormk
     use boundary,     only:dxbound,dybound,dzbound,xmax,xmin,ymax,ymin,zmax,zmin
@@ -167,15 +165,15 @@ contains
     real,    intent(in) :: xyzh(4,npart),force_ref(3,npart_ref),xyzh_ref(5,npart_ref),pmass_ref(npart_ref)
     integer, intent(in) :: to_shuffle(n_toshuffle)
     real,    intent(out) :: a_ref(3,npart)
-    real :: xi,yi,zi,hi,rij(3),h21,qj2,rij2,rhoj,h31,mass_ref
+    real :: xi,yi,zi,hi,rij(3),h21,qj2,rij2,rhoj,h31,mass_ref,pmassi
     integer :: i,j,iamtypej,k
 
     a_ref(:,:) = 0.
 
     !$omp parallel do schedule(guided) default (none) &
-    !$omp shared(xyzh,xyzh_ref,npart,npart_ref,force_ref,a_ref,pmass_ref,to_shuffle,n_toshuffle) &
+    !$omp shared(xyzh,xyzh_ref,npart,npart_ref,force_ref,a_ref,pmass_ref,to_shuffle,n_toshuffle,massoftype,iphase) &
     !$omp shared(mass_ref,dxbound,dybound,dzbound) &
-    !$omp private(i,j,xi,yi,zi,rij,h21,h31,rhoj,rij2,qj2)
+    !$omp private(i,j,xi,yi,zi,rij,h21,h31,rhoj,rij2,qj2,pmassi)
 
     ! Over the new set of particles that are to be shuffled
     over_new: do k = 1,n_toshuffle
@@ -184,6 +182,7 @@ contains
       xi = xyzh(1,i)
       yi = xyzh(2,i)
       zi = xyzh(3,i)
+      pmassi = massoftype(iphase(i))
 
       ! Over the reference set of particles to which we are matching the accelerations
       over_reference: do j = 1,npart_ref  ! later this should only be over active particles
@@ -213,7 +212,6 @@ contains
     enddo over_new
 
     !$omp end parallel do
-
 
   end subroutine get_reference_accelerations
 

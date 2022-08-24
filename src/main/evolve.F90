@@ -242,11 +242,11 @@ subroutine evol(infile,logfile,evfile,dumpfile)
   call update_splitting(npart,xyzh,vxyzu,fxyzu,npartoftype,need_to_relax)
   if (need_to_relax) then
     ! accelerations method
-    !call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
-    !                    force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
+    call relaxparticles(npart,xyzh(1:4,1:npart),n_ref,xyzh_ref(1:5,1:n_ref), &
+                        force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
     ! grad rho/rho method
     !
-    call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix,n_toshuffle,to_shuffle(1:n_toshuffle))
+    !call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix,n_toshuffle,to_shuffle(1:n_toshuffle))
   endif
   call shuffle_part(npart)
 #endif

@@ -32,7 +32,7 @@ module utils_shuffleparticles
  integer, parameter :: iarray       = 3
  integer, parameter :: ireference   = 4
  ! additional parameters
- integer, parameter :: maxcellcache = 50000
+ integer, parameter :: maxcellcache = 7000000
  integer            :: ncall        =     1  ! to track the number of calls to this subroutine for debugging
  logical            :: firstcall    = .true. ! logical to control debugging print statements
  private
@@ -110,7 +110,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,duniform,rsphere,dsphere,dme
 #endif
 
  !--Initialise free parameters
- idebug            =    1  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2)
+ idebug            =    3  ! 0 = off; 1=errors; 2=initial & final distribution + (1); 3=print every step + (2)
  nshiftmax         =  200 !600 ! maximum number of shuffles/iterations
  max_shift_thresh  = 0. !4.d-3 ! will stop shuffling once (maximum shift)/h is less than this value
  link_shift_thresh = 0.01  ! will recalculate the link list when the cumulative maximum relative shift surpasses this limit (=0 will call every loop)
@@ -189,7 +189,6 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,duniform,rsphere,dsphere,dme
 
     !--Calculate grad rho / rho for the reference particles
     call set_linklist(n_ref,n_ref,xyzh_ref(1:4,:),vxyzu)
-
     grrhoonrhoe_ref = 0.
 !$omp parallel default (none) &
 !$omp shared(xyzh_ref,pmass_ref,grrhoonrhoe_ref,n_ref,iphase) &
@@ -201,6 +200,7 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,duniform,rsphere,dsphere,dme
 !$omp private(icell,ineigh,ip,nneigh,denom,gradhi,gradhj,pmassi,pmassj)
 !$omp do schedule(runtime)
     over_ref_cells: do icell=1,int(ncells)
+
        k = ifirstincell(icell)
 
        ! Skip empty cells AND inactive cells
@@ -451,13 +451,17 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,duniform,rsphere,dsphere,dme
           is_ref = .true.
         else
           is_ref = .false.
-          ! set the "new" arrangement with the properties calculated
+          ! if not using ghosts, the reference distribution comes from
+          ! *all* of the old particles, irrespective of their mass
+
+          ! otehrwise, set the "new" arrangement with the properties calculated
           ! across the particles of the same size; this means
           ! splits are taking contribution from splitghosts and
           ! merged are taking contributions from mergedghosts
           ! but there's no contributions across resolutions
           if (iamspliti .and. .not.iamsplitj) cycle over_neighbours
           if (.not.iamspliti .and. iamsplitj) cycle over_neighbours
+
         endif
 
              pmassj = massoftype(iamtype(iphase(j)))
@@ -504,7 +508,8 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,duniform,rsphere,dsphere,dme
 
                 if (qi2 < radkern2) then
                    wkerni      = wkern(qi2,sqrt(qi2))
-                   ! why did this have "j-npart" instead of "j"?
+                   ! why did this have "j-npart" instead of "j"? It doesn't *appear* to make a difference,
+                   ! because these are the copied reference particles
                    grrhoonrhoe = grrhoonrhoe + grrhoonrhoe_ref(:,j)*wkerni
                    kernsum     = kernsum + wkerni
                 endif

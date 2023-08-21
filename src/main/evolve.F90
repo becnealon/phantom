@@ -246,6 +246,7 @@ subroutine evol(infile,logfile,evfile,dumpfile)
                         force_ref(1:3,1:n_ref),pmass_ref(1:n_ref),n_toshuffle,to_shuffle(1:npart))
     ! grad rho/rho method
     !
+    !print*,'sending in ',n_toshuffle,' to be shuffled from ',n_ref,' references.'
     !call relax_by_shuffling(xyzh,xyzh(4,:),vxyzu,npart,rho_ave,time,prefix,n_toshuffle,to_shuffle(1:n_toshuffle))
   endif
   call shuffle_part(npart)

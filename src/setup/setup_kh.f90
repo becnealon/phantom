@@ -83,7 +83,7 @@ subroutine setpart(id,npart,npartoftype,xyzh,massoftype,vxyzu,polyk,gamma,hfact,
  maxp = size(xyzh(1,:))
  maxvxyzu = size(vxyzu(:,1))
  if (id==master) then
-    npartx = 64
+    npartx = 8
     call prompt('enter number of particles in x direction ',npartx,1,nint(sqrt(maxp/12.)))
  endif
  call bcast_mpi(npartx)

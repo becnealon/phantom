@@ -383,6 +383,7 @@ subroutine densityiterate(icall,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,Bevol
                 nrelink = nrelink + 1
              endif
              call compute_cell(cell,listneigh,nneigh,getdv,getdB,Bevol,xyzh,vxyzu,fxyzu,fext,xyzcache,rad)
+
 #ifdef MPI
              if (do_export) then
                 stack_waiting%cells(cell%waiting_index) = cell
@@ -592,7 +593,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
 #endif
  use kernel,   only:get_kernel,get_kernel_grav1
  use part,     only:iphase,iamgas,iamdust,iamtype,maxphase,ibasetype,igas,idust,rhoh,massoftype,iradxi
- use dim,      only:ndivcurlv,gravity,maxp,nalpha,use_dust,do_radiation
+ use dim,      only:ndivcurlv,gravity,maxp,nalpha,use_dust,do_radiation,split
  integer,      intent(in)    :: i
  real,         intent(in)    :: xpartveci(:)
  real(kind=8), intent(in)    :: hi,hi1,hi21
@@ -619,7 +620,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
  real                        :: wabi,grkerni,dwdhi,dphidhi
  real                        :: projv,dvx,dvy,dvz,dax,day,daz
  real                        :: projdB,dBx,dBy,dBz,fxi,fyi,fzi,fxj,fyj,fzj
- real                        :: rhoi,rhoj,pmassi
+ real                        :: rhoi,rhoj,pmassi,pmassj
  logical                     :: same_type,gas_gas,iamdustj
  real                        :: dradenij
 
@@ -723,17 +724,20 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
           iamtypej  = iamtype(iphasej)
           iamdustj  = iamdust(iphasej)
           same_type = ((iamtypei == iamtypej) .or. (ibasetype(iamtypej)==iamtypei))
+          !if (split) same_type = .true. ! all particles should be used if splitting is on
           gas_gas   = ((iamgasi .or. iamspliti) .and. same_type) ! this ensure that boundary particles are included in gas_gas calculations
           pmassi    = massoftype(iamtypei)
+          pmassj    = massoftype(iamtypej)
        else
           pmassi    = massoftype(igas)
+          pmassj    = pmassi
        endif
 
        sametype: if (same_type) then
           dwdhi = (-qi*grkerni - 3.*wabi)
-          rhosum(irhoi)      = rhosum(irhoi) + wabi
-          rhosum(igradhi)    = rhosum(igradhi) + dwdhi
-          rhosum(igradsofti) = rhosum(igradsofti) + dphidhi
+          rhosum(irhoi)      = rhosum(irhoi) + wabi*pmassj
+          rhosum(igradhi)    = rhosum(igradhi) + dwdhi*pmassj
+          rhosum(igradsofti) = rhosum(igradsofti) + dphidhi*pmassj
           nneighi            = nneighi + 1
           !
           ! calculate things needed for viscosity switches
@@ -827,7 +831,7 @@ pure subroutine get_density_sums(i,xpartveci,hi,hi1,hi21,iamtypei,iamgasi,iamdus
 
              if (do_radiation .and. gas_gas) then
                 rhoi = rhoh(real(hi),  pmassi)
-                rhoj = rhoh(xyzh(4,j), pmassi)  ! can use pmassi since same_type=.true.
+                rhoj = rhoh(xyzh(4,j), pmassj)  ! can use pmassi since same_type=.true.
                 dradenij = rad(iradxi,j)*rhoj - xpartveci(iradxii)*rhoi
                 rhosum(iradfxi) = rhosum(iradfxi) + dradenij*runix
                 rhosum(iradfyi) = rhosum(iradfyi) + dradenij*runiy
@@ -1449,6 +1453,7 @@ subroutine finish_cell(cell,cell_converged)
 
  enddo over_parts
 
+
 end subroutine finish_cell
 !--------------------------------------------------------------------------
 !+
@@ -1474,8 +1479,8 @@ pure subroutine finish_rhosum(rhosum,pmassi,hi,iterating,rhoi,rhohi,gradhi,grads
  hi31  = hi1*hi21
  hi41  = hi21*hi21
 
- rhoi   = cnormk*pmassi*(rhosum(irhoi) + wab0)*hi31
- gradhi = cnormk*pmassi*(rhosum(igradhi) + gradh0)*hi41
+ rhoi   = cnormk*(rhosum(irhoi) + wab0*pmassi)*hi31
+ gradhi = cnormk*(rhosum(igradhi) + gradh0*pmassi)*hi41
 
  dhdrhoi = dhdrho(hi,pmassi)
  omegai = 1. - dhdrhoi*gradhi
@@ -1486,7 +1491,7 @@ pure subroutine finish_rhosum(rhosum,pmassi,hi,iterating,rhoi,rhohi,gradhi,grads
     dhdrhoi_out = dhdrhoi
     omegai_out = omegai
  else
-    gradsofti = pmassi*(rhosum(igradsofti) + dphidh0)*hi21 ! NB: no cnormk in gradsoft
+    gradsofti = (rhosum(igradsofti) + dphidh0*pmassi)*hi21 ! NB: no cnormk in gradsoft
     gradsofti = gradsofti*dhdrhoi
  endif
 

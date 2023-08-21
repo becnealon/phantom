@@ -70,6 +70,7 @@ contains
       ! Todo: cut-off criteria
       if (ishift >= nshifts) converged = .true.
       ishift = ishift + 1
+    !  print*,'Relaxing at step ',ishift
 
     enddo
 
@@ -93,24 +94,26 @@ contains
     use eos,      only: get_spsound
     use deriv,    only:get_derivs_global
     use options,  only:ieos
-    use boundary, only:cross_boundary
+    use boundary, only:cross_boundary,xmin,xmax,ymin,ymax
     use domain,   only:isperiodic
+    use physcon,  only:pi
     integer, intent(in)     :: npart,n_toshuffle
     real,    intent(inout)  :: xyzh(4,npart)
     real,    intent(in)     :: a_ref(3,npart)
     integer, intent(in)     :: to_shuffle(n_toshuffle)
     real,    intent(out)    :: ke,maxshift
-    real :: hi,rhoi,cs,dti,dx(3),vi(3),err
+    real :: hi,rhoi,cs,dti,dx(3),vi(3),err,x_bound,y_bound,limit_bound
     integer :: nlargeshift,i,iamtypei,ncross,j
 
     ke = 0.
     nlargeshift = 0
     ncross = 0
     maxshift = tiny(maxshift)
+    limit_bound = 0.4 !! This probably shouldn't be more than 0.5
     !$omp parallel do schedule(guided) default(none) &
     !$omp shared(npart,xyzh,vxyzu,fxyzu,massoftype,ieos,iphase,a_ref,maxshift) &
-    !$omp shared(isperiodic,ncross,to_shuffle,n_toshuffle) &
-    !$omp private(i,dx,dti,cs,rhoi,hi,vi,iamtypei,err) &
+    !$omp shared(isperiodic,ncross,to_shuffle,n_toshuffle,xmin,xmax,ymin,ymax,limit_bound) &
+    !$omp private(i,dx,dti,cs,rhoi,hi,vi,iamtypei,err,x_bound,y_bound) &
     !$omp reduction(+:nlargeshift,ke)
     do j=1,n_toshuffle
       if (to_shuffle(j) == 0) cycle
@@ -128,6 +131,17 @@ contains
         dx = dx / sqrt(dot_product(dx,dx)) * hi  ! Avoid large shift in particle position !check with what James has done
         nlargeshift = nlargeshift + 1
       endif
+
+      ! Anisotropic shuffling
+      ! Calculate the distance from each boundary
+      x_bound = min(abs(xyzh(1,i) - xmin),abs(xyzh(1,i) - xmax))
+      x_bound = x_bound/(xmax-xmin)
+      if (x_bound < limit_bound) dx(1) = dx(1)*(sin(x_bound*pi/(2*limit_bound))**4)
+      y_bound = min(abs(xyzh(2,i) - ymin),abs(xyzh(2,i) - ymax))
+      y_bound = y_bound/(ymax-ymin)
+      !print*,i,'y function is',(0.01*log(y_bound) + 1)
+      if (y_bound < limit_bound) dx(2) = dx(2)*(sin(y_bound*pi/(2*limit_bound))**4)
+
       xyzh(1:3,i) = xyzh(1:3,i) + dx(:)
       if (periodic) call cross_boundary(isperiodic,xyzh(:,i),ncross)
       vi(1:3) = dx(:)/dti ! fake velocities, so we can estimate the magnitude of the shift
@@ -140,6 +154,8 @@ contains
     enddo
     !$omp end parallel do
     if (nlargeshift > 0) print*,'Warning: Restricted dx for ', nlargeshift, 'particles'
+
+    !print*,'made it to the end of this routine'
 
     !
     ! get forces on particles

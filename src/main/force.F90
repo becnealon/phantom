@@ -918,7 +918,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
  real,            intent(in)    :: rad(:,:),dens(:),metrics(:,:,:,:)
  real,            intent(inout) :: radprop(:,:)
  integer :: j,n,iamtypej
- logical :: iactivej,iamgasj,iamdustj,iamsplitj,iamghostj
+ logical :: iactivej,iamgasj,iamdustj,iamsplitj,iamghostj,iamghosti
  real    :: rij2,q2i,qi,xj,yj,zj,dx,dy,dz,runix,runiy,runiz,rij1,hfacgrkern
  real    :: grkerni,grgrkerni,dvx,dvy,dvz,projv,denij,vsigi,vsigu,dudtdissi
  real    :: projBi,projBj,dBx,dBy,dBz,dB2,projdB
@@ -1060,6 +1060,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
  iamdustj  = .false.
  iamsplitj = .false.
 
+
  ! to find max ibin of all of i's neighbours
  ibin_neighi = 0_1
 
@@ -1148,12 +1149,6 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
 
     j = abs(listneigh(n))
     if ((ignoreself) .and. (i==j)) cycle loop_over_neighbours2
-
-#ifdef SPLITTING
-  iamsplitj = iamsplit(iphase(j)) !!! MAKE THIS NEATER LIKE IN DENS
-  if (iamspliti .and. .not.iamsplitj) cycle loop_over_neighbours2
-  if (.not.iamspliti .and. iamsplitj) cycle loop_over_neighbours2
-#endif
 
     if (ifilledcellcache .and. n <= maxcellcache) then
        ! positions from cache are already mod boundary
@@ -1263,6 +1258,12 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
        if (mhd) usej = .true.
        if (use_dust) usej = .true.
        if (maxvxyzu >= 4 .and. .not.gravity) usej = .true.
+#ifdef SPLITTING
+      iamghostj = iamghost(iphase(j))
+      iamsplitj = iamsplit(iphase(j))
+      if (iamspliti .and. .not.iamsplitj) usej = .false.
+      if (.not.iamspliti .and. iamsplitj) usej = .false.
+#endif
 
        !--get individual timestep/ multiphase information (querying iphase)
        if (maxphase==maxp) then
@@ -1324,7 +1325,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
        vij       = abs((projbigvi-projbigvj)/(1.-projbigvi*projbigvj))
 #endif
 
-       if ((iamgasi .and. iamgasj) .or. (iamspliti .and. iamsplitj)) then
+       if ((iamgasi .or. iamspliti) .and. (iamgasj .or. iamsplitj)) then
           !--work out vsig for timestepping and av
 #ifdef GR
           ! Relativistic version vij + csi    (could put a beta here somewhere?)
@@ -1371,7 +1372,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
 
           if (maxdvdx==maxp) dvdxj(:) = dvdx(:,j)
 
-          if (iamgasj .or. iamsplitj) then
+          if ((iamgasj .or. iamsplitj)) then
              if (ndivcurlv >= 1) divvj = divcurlv(1,j)
              if (use_dustfrac) then
                 dustfracj(:) = dustfrac(:,j)
@@ -1793,7 +1794,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,iamspliti,xpartveci,hi,hi1,hi21,hi4
                    dragheating = dragterm*projv
                    fsum(idudtdissi) = fsum(idudtdissi) + dragheating
                 endif
-             elseif (iamdusti .and. (iamgasj .or. iamsplitj)) then
+             elseif (iamdusti .and. iamgasj) then
                 projvstar = projv
                 if (irecon >= 0) call reconstruct_dv(projv,dx,dy,dz,runix,runiy,runiz,dvdxi,dvdxj,pmassi,pmassj,projvstar,irecon)
                 dv2 = projvstar**2 !dvx*dvx + dvy*dvy + dvz*dvz
@@ -2034,7 +2035,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
  integer :: iregime
 #endif
 
- logical :: iactivei,iamgasi,iamdusti,iamspliti,realviscosity
+ logical :: iactivei,iamgasi,iamdusti,iamspliti,iamghosti,realviscosity
 
  realviscosity = (irealvisc > 0)
 
@@ -2055,6 +2056,7 @@ subroutine start_cell(cell,iphase,xyzh,vxyzu,gradh,divcurlv,divcurlB,dvdx,Bevol,
        iamgasi   = .true.
        iamspliti = .false.
     endif
+
     if (.not.iactivei) then ! handles boundaries + case where first particle in cell is inactive
        cycle over_parts
     endif
@@ -2972,7 +2974,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
        if (dti < tiny(dti) .or. dti > huge(dti)) call fatal('force','invalid dti',var='dti',val=dti) ! sanity check
        dtcheck = .true.
        dtrat   = dtc/dti
-       if ( iamgasi .or. iamspliti ) then
+       if (iamgasi .or. iamspliti) then
           call check_dtmin(dtcheck,dti,dtf    ,dtrat,ndtforce  ,dtfrcfacmean  ,dtfrcfacmax  ,dtchar,'dt_gasforce' )
           call check_dtmin(dtcheck,dti,dtcool ,dtrat,ndtcool   ,dtcoolfacmean ,dtcoolfacmax ,dtchar,'dt_cool'     )
           call check_dtmin(dtcheck,dti,dtvisci,dtrat,ndtvisc   ,dtviscfacmean ,dtviscfacmax ,dtchar,'dt_visc'     )

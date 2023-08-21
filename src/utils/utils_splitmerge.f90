@@ -33,8 +33,9 @@ module splitmergeutils
  logical, parameter, public :: DJP_eqn13    = .false.  ! JHW's attempt to implement eqn 13 of DJP's notes ! HIS EQUATioN IS BUGGED'; REPURPOSED FOR a hybrid 17
  logical, parameter, public :: Hubber_eqn94 = .false.  ! JHW's attempt to implement eqn 94 of Hubber, Rosotti & Booth (2018)
  ! initialise random number generator for split_a_particle
- integer, private :: iseed       = -6542
- integer, private :: anotherseed = -2845
+ integer, private :: iseed = -6542
+ integer, private :: jseed = -2845
+ integer, private :: kseed = -8153
  integer :: npart_exact
  contains
 
@@ -70,7 +71,7 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,i
  sep    = sep_factor*xyzh(4,iparent)
  ichild = 0
  beta   = acos(2.0*ran2(iseed)-1.0)
- gamma  = 2.0*pi*ran2(anotherseed)
+ gamma  = 2.0*pi*ran2(jseed)
 
  do j=0,nchild-1
     ichild = ichild + 1
@@ -108,6 +109,64 @@ subroutine split_a_particle(nchild,iparent,xyzh,vxyzu,npartoftype,lattice_type,i
  endif
 
 end subroutine split_a_particle
+
+!--------------------------------------------------------------------------
+!+
+!  divides a particle specifically into two, ala Angl´es-Alc´azar et al. 2020
+!+
+!--------------------------------------------------------------------------
+subroutine divide_a_particle(nchild,iparent,npart,xyzh,vxyzu,npartoftype,ichildren)
+ use part,        only:copy_particle_all,igas,isplit,set_particle_type,kill_particle,iphase
+ use random,      only:ran2
+ use physcon,     only:pi
+ use vectorutils, only:rotatevec
+ integer, intent(in)    :: nchild,iparent,ichildren,npart
+ real,    intent(inout) :: xyzh(:,:),vxyzu(:,:)
+ integer, intent(inout) :: npartoftype(:)
+ integer :: j,ichild
+ real    :: dhfac,dx(3),sep,hchild,mag,distance,mindistance
+ real    :: hfactor,dfactor
+
+ ! the factors controlling the radius particles puff to
+ hfactor = 0.50
+ dfactor = 0.50
+
+ dhfac = 1./(nchild)**(1./3.)
+ hchild = xyzh(4,iparent)*dhfac
+ ichild = 1
+
+ ! change the parent into a child and create a new particle
+ call set_particle_type(iparent,isplit)
+ xyzh(4,iparent) = dhfac*xyzh(4,iparent)
+ call copy_particle_all(iparent,ichildren+ichild,.true.)
+
+ ! find the separation distance from the parent
+ mindistance = huge(mindistance)
+ do j = 1,npart
+   if (j == iparent) cycle
+   dx = xyzh(1:3,j) - xyzh(1:3,iparent)
+   distance = dot_product(dx,dx)
+   if (distance < mindistance) mindistance = distance
+ enddo
+ mindistance = sqrt(mindistance)
+ sep = min(hfactor*xyzh(4,iparent),dfactor*mindistance)
+
+ ! create new positions
+ dx(1) = ran2(iseed)
+ dx(2) = ran2(jseed)
+ dx(3) = ran2(kseed)
+ mag = sqrt(dot_product(dx,dx))
+ dx = dx/mag * sep
+
+ ! assign new positions
+ xyzh(1:3,iparent) = xyzh(1:3,iparent) + dx(:)
+ xyzh(1:3,ichildren+ichild) = xyzh(1:3,ichildren+ichild) - dx(:)
+
+ ! tidy up particle types
+ npartoftype(igas)   = npartoftype(igas)   - 1
+ npartoftype(isplit) = npartoftype(isplit) + 2
+
+end subroutine divide_a_particle
 
 subroutine sample_kernel(iseed0,dx)
  use random, only:gauss_random,get_random_pos_on_sphere

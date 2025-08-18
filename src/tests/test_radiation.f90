@@ -88,7 +88,7 @@ subroutine test_exchange_terms(ntests,npass,use_implicit)
  use options,    only:exchange_radiation_energy
  use io,         only:iverbose
  use part,       only:init_part,npart,rhoh,xyzh,fxyzu,vxyzu,massoftype,igas,&
-                      iphase,maxphase,isetphase,rhoh,drad,&
+                      iphase,maxphase,isetphase,rhoh,drad,apr_level,&
                       npartoftype,rad,radprop,maxvxyzu,luminosity
  use kernel,     only:hfact_default
  use unifdis,    only:set_unifdis
@@ -142,7 +142,7 @@ subroutine test_exchange_terms(ntests,npass,use_implicit)
  npartoftype(1) = npart
  pmassi = massoftype(igas)
 
- if (use_implicit) call set_linklist(npart,npart,xyzh,vxyzu)
+ if (use_implicit) call set_linklist(npart,npart,xyzh,vxyzu,apr_level)
  !
  ! first version of the test: set gas temperature high and radiation temperature low
  ! so that gas cools towards radiation temperature (itest=1)

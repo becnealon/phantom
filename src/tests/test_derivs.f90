@@ -926,7 +926,7 @@ subroutine test_cullendehnen(hzero,mask,ntests,npass)
 
     call getused(tused)
     ! ONLY call density, since we do not want accelerations being reset
-    call set_linklist(npart,nactive,xyzh,vxyzu)
+    call set_linklist(npart,nactive,xyzh,vxyzu,apr_level)
     call densityiterate(1,npart,nactive,xyzh,vxyzu,divcurlv,divcurlB,&
                         Bevol,stressmax,fxyzu,fext,alphaind,gradh,&
                         rad,radprop,dvdx,apr_level)

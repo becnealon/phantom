@@ -378,7 +378,7 @@ subroutine startrun(infile,logfile,evfile,dumpfile,noread)
 !
  if (mhd .or. use_dustfrac) then
     if (npart > 0) then
-       call set_linklist(npart,npart,xyzh,vxyzu)
+       call set_linklist(npart,npart,xyzh,vxyzu,apr_level)
        fxyzu = 0.
        call densityiterate(2,npart,npart,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
                               fxyzu,fext,alphaind,gradh,rad,radprop,dvdx,apr_level)
@@ -459,7 +459,7 @@ subroutine startrun(infile,logfile,evfile,dumpfile,noread)
     endif
     ! --- Need rho computed by sum to do primitive to conservative, since dens is not read from file
     if (npart > 0) then
-       call set_linklist(npart,npart,xyzh,vxyzu)
+       call set_linklist(npart,npart,xyzh,vxyzu,apr_level)
        fxyzu = 0.
        call densityiterate(2,npart,npart,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
                               fxyzu,fext,alphaind,gradh,rad,radprop,dvdx,apr_level)

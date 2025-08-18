@@ -294,14 +294,14 @@ subroutine shuffleparticles(iprint,npart,xyzh,pmass,duniform,rsphere,dsphere,dme
 
     ! update densities
     if (call_linklist .or. iprofile==ireference) then
-       call set_linklist(npart,npart,xyzh,vxyzu)
+       call set_linklist(npart,npart,xyzh,vxyzu,apr_level)
        nlink      = nlink + 1
        link_shift = 0.
     endif
     call densityiterate(2,npart,npart,xyzh,vxyzu,divcurlv,divcurlB,Bevol,stressmax,&
                                fxyzu,fext,alphaind,gradh,rad,radprop,dvdx,apr_level)
     if (iprofile==ireference) then
-       call set_linklist(n_part,n_part,xyzh,vxyzu)
+       call set_linklist(n_part,n_part,xyzh,vxyzu,apr_level)
     endif
 
     ! initialise variables for this loop

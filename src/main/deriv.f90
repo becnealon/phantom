@@ -85,7 +85,7 @@ subroutine derivs(icall,npart,nactive,xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,&
  real,         intent(out)   :: dtnew
  real,         intent(inout) :: pxyzu(:,:), dens(:)
  real,         intent(inout) :: metrics(:,:,:,:)
- integer(kind=1), intent(in) :: apr_level(:)
+ integer(kind=1), intent(inout) :: apr_level(:)
  integer                     :: ierr,i
  real(kind=4)                :: t1,tcpu1,tlast,tcpulast
 
@@ -110,7 +110,7 @@ subroutine derivs(icall,npart,nactive,xyzh,vxyzu,fxyzu,fext,divcurlv,divcurlB,&
 ! call link list to find neighbours
 !
  if (icall==1 .or. icall==0) then
-    call set_linklist(npart,nactive,xyzh,vxyzu)
+    call set_linklist(npart,nactive,xyzh,vxyzu,apr_level)
 
     if (gr) then
        ! Recalculate the metric after moving particles to their new tasks

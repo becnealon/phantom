@@ -1514,7 +1514,7 @@ subroutine combine_two_particles(keep,discard)
  if (use_krome) then
     T_gas_cool(keep)       = 0.5*(T_gas_cool(keep) + T_gas_cool(discard))
  endif
- ibelong(keep) = ibelong(keep)  ! not sure what to do here
+ !ibelong(keep) = ibelong(keep)  ! not sure what to do here
  if (maxsts==maxp) then
     if (istsactive(keep) /= istsactive(discard)) make_warning = .true.
     ibin_sts(keep) = min(ibin_sts(keep),ibin_sts(discard))

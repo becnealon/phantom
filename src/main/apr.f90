@@ -147,6 +147,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
  integer :: n_ref,nrelax,nmerge,nkilled,apr_current,nmerge_total
  real, allocatable :: xyzh_ref(:,:),force_ref(:,:),pmass_ref(:)
  real, allocatable :: xyzh_merge(:,:),vxyzu_merge(:,:)
+ integer(kind=1), allocatable :: apr_level_merge(:)
  integer, allocatable :: relaxlist(:),mergelist(:),iclosest
  real :: get_apr_in(3)
 
@@ -240,7 +241,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
  endif
 
  ! Do any particles need to be merged?
- allocate(mergelist(npart),xyzh_merge(4,npart),vxyzu_merge(maxvxyzu,npart))
+ allocate(mergelist(npart),xyzh_merge(4,npart),vxyzu_merge(maxvxyzu,npart),apr_level_merge(npart))
  npart_regions = 0
  nmerge_total = 0
  iclosest = 1
@@ -253,6 +254,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
        nkilled = 0
        xyzh_merge = 0.
        vxyzu_merge = 0.
+       apr_level_merge = 0.
 
        merge_over_active: do ii = 1,npart
           ! note that here we only do this process for particles that are not already counted in the blending region
@@ -266,6 +268,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
                 mergelist(nmerge) = ii
                 xyzh_merge(1:4,nmerge) = xyzh(1:4,ii)
                 vxyzu_merge(1:3,nmerge) = vxyzu(1:3,ii)
+                apr_level_merge(nmerge) = apr_level(ii)
                 npart_regions(kk) = npart_regions(kk) + 1
              endif
           endif
@@ -273,7 +276,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
        if (apr_verbose) print*,nmerge,'particles selected for merge'
        ! Now send them to be merged
        if (nmerge > 1) call merge_with_special_tree(nmerge,mergelist(1:nmerge),xyzh_merge(:,1:nmerge),&
-                                            vxyzu_merge(:,1:nmerge),kk,xyzh,vxyzu,apr_level,nkilled,&
+                                            vxyzu_merge(:,1:nmerge),kk,xyzh,vxyzu,apr_level_merge,nkilled,&
                                             nrelax,relaxlist,npartnew)
        nmerge_total = nmerge_total + nkilled ! actually merged
        if (apr_verbose) then
@@ -300,7 +303,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
  if (do_relax) then
     deallocate(xyzh_ref,force_ref,pmass_ref)
  endif
- deallocate(mergelist,relaxlist)
+ deallocate(mergelist,relaxlist,apr_level_merge)
 
  if (apr_verbose) print*,'total particles at end of apr: ',npart
 
@@ -428,33 +431,36 @@ end subroutine splitpart
 !+
 !-----------------------------------------------------------------------
 subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,current_apr,&
-                                     xyzh,vxyzu,apr_level,nkilled,nrelax,relaxlist,npartnew)
+                                     xyzh,vxyzu,apr_level_merge,nkilled,nrelax,relaxlist,npartnew)
  use linklist, only:set_linklist,ncells,ifirstincell,get_cell_location
  use mpiforce, only:cellforce
  use kdtree,   only:inodeparts,inoderange
- use part,     only:kill_particle,npartoftype,igas
- use part,     only:combine_two_particles
+ use part,     only:kill_particle,igas,apr_level_soa,apr_level
+ use part,     only:combine_two_particles,igas,aprmassoftype
  use dim,      only:ind_timesteps,maxvxyzu
+ use vectorutils, only:cross_product3D
  use get_apr_level, only:get_apr
  integer,         intent(inout) :: nmerge,nkilled,nrelax,relaxlist(:),npartnew
- integer(kind=1), intent(inout) :: apr_level(:)
+ integer(kind=1), intent(inout) :: apr_level_merge(:)
  integer,         intent(in)    :: current_apr,mergelist(:)
  real,            intent(inout) :: xyzh(:,:),vxyzu(:,:)
  real,            intent(inout) :: xyzh_merge(:,:),vxyzu_merge(:,:)
  integer :: remainder,icell,i,n_cell,apri,m
- integer :: eldest,tuther
- real    :: com(3)
+ integer :: eldest,tuther,testp,testpp,n
+ real    :: com(3),pos_com(3),vel_com(3),am(3),pmassi,ogen(3),ogam(3)
+ real    :: ex,ey,ez,xyzh_rot(3),vxyzu_rot(3),en(3),am_term(3)
  type(cellforce)        :: cell
 
  ! First ensure that we're only sending in a multiple of 2 to the tree
- remainder = modulo(nmerge,2)
+ remainder = modulo(nmerge,12)
  nmerge = nmerge - remainder
 
  call set_linklist(nmerge,nmerge,xyzh_merge(:,1:nmerge),vxyzu_merge(:,1:nmerge),&
-                      for_apr=.true.)
+                      apr_level_merge(1:nmerge),for_apr=.true.)
  ! Now use the centre of mass of each cell to check whether it should
  ! be merged or not
  com = 0.
+ pmassi = aprmassoftype(igas,apr_level_merge(1)) ! this *current* mass is correct
  over_cells: do icell=1,int(ncells)
     i = ifirstincell(icell)
     if (i == 0) cycle over_cells !--skip empty cells
@@ -471,29 +477,125 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
     ! we merge!
     if (apri < current_apr) then
 
-       eldest = mergelist(inodeparts(inoderange(1,icell)))
-       tuther = mergelist(inodeparts(inoderange(1,icell) + 1)) !as in kdtree
+      ! here we take 12 particles from each leaf in the tree and combine these into six new particles
+      ! the new particles are constructed to conserve the average properties of the children
 
-       ! merge by averaging everything
-       call combine_two_particles(eldest,tuther)
+      ! start by calculating (or using) the average properties of the 12 children
+      pos_com = 0.
+      vel_com(:) = 0.
+      am(:) = 0.
+      i = inodeparts(inoderange(1,icell))
+      ex = 0.
+      ey = 0.
+      ez = 0.
 
-       xyzh(4,eldest) = (0.5*(xyzh(4,eldest) + xyzh(4,tuther)))*(2.0**(1./3.))
-       apr_level(eldest) = apr_level(eldest) - int(1,kind=1)
-       if (ind_timesteps) call put_in_smallest_bin(eldest)
-
-       ! add it to the shuffling list if needed
-       if (do_relax) then
-          nrelax = nrelax + 1
-          relaxlist(nrelax) = eldest
-       endif
-
-       ! discard tuther (t'other)
-       call kill_particle(tuther,npartoftype)
-       nkilled = nkilled + 2 ! this refers to the number of children killed
-       ! If this particle was on the shuffle list previously, take it off
-       do m = 1,nrelax
-          if (relaxlist(m) == tuther) relaxlist(m) = 0
+       do m = 1,n_cell
+         i = inodeparts(inoderange(1,icell) + m - 1)
+         vel_com(:) = vel_com(:) + vxyzu_merge(1:3,i)
+         pos_com(:) = pos_com(:) + xyzh_merge(1:3,i)
+         call cross_product3D(xyzh_merge(1:3,i),vxyzu_merge(1:3,i),am_term(:))
+         am(:) = am(:) + pmassi*am_term(:)
+         ex = ex + 0.5*pmassi*vxyzu_merge(1,i)**2
+         ey = ey + 0.5*pmassi*vxyzu_merge(2,i)**2
+         ez = ez + 0.5*pmassi*vxyzu_merge(3,i)**2
        enddo
+       ogen(:) = (/ ex, ey ,ez /)
+       ogam(:) = am(:)
+       vel_com(:) = vel_com(:)/real(n_cell)
+       pos_com(:) = pos_com(:)/real(n_cell)
+
+       ! for next round
+       am(:) = 0.
+       ex = 0.
+       ey = 0.
+       ez = 0.
+
+       ! now we need am and en in rotated frame
+       do m = 1,n_cell
+         testp = inodeparts(inoderange(1,icell) + m - 1) !as in kdtree
+         xyzh_rot(:) = xyzh_merge(1:3,testp) - pos_com(:)
+         vxyzu_rot(:) = vxyzu_merge(1:3,testp) - vel_com(:)
+         call cross_product3D(xyzh_rot,vxyzu_rot,am_term(:))
+         am(:) = am(:) + pmassi*am_term(:)
+         ex = ex + 0.5*pmassi*vxyzu_rot(1)**2
+         ey = ey + 0.5*pmassi*vxyzu_rot(2)**2
+         ez = ez + 0.5*pmassi*vxyzu_rot(3)**2
+       enddo
+       en(:) = (/ex,ey,ez/) ! we don't average energy or am components
+       
+       ! merge the first six particles with the last six particles
+       do m = 1,6
+         eldest = mergelist(inodeparts(inoderange(1,icell) + m - 1)) ! remember we're running off the mergelist
+         tuther = mergelist(inodeparts(inoderange(1,icell) + m + 5))
+         ! discard tuther (t'other)
+         call combine_two_particles(eldest,tuther)
+         apr_level(eldest) = apr_level(eldest) - int(1,kind=1)
+         apr_level_soa(eldest) = apr_level(eldest)
+         xyzh(4,eldest) = (xyzh(4,eldest))*(2.0**(1./3.)) ! rescale for its new mass
+         if (ind_timesteps) call put_in_smallest_bin(eldest)
+         
+         ! book-keeping
+         if (do_relax) then
+            nrelax = nrelax + 1
+            relaxlist(nrelax) = eldest
+         endif
+
+         ! If this particle was on the shuffle list previously, take it off
+         do n = 1,nrelax
+            if (relaxlist(n) == tuther) relaxlist(n) = 0
+         enddo
+       enddo
+
+       nkilled = nkilled + 12 ! this refers to the number of children killed
+
+       ! now, let's adjust the properties of the remaining particles
+       ! to construct the properties we want (in the com frame first, then edit to simulation frame)
+       pmassi = 2.*pmassi
+       ! particle 1:
+       testp = mergelist(inodeparts(inoderange(1,icell)))
+       xyzh(1:3,testp) = (/ (am(3)/(2.*pmassi))/sqrt(en(2)/pmassi), 0., 0./)
+       vxyzu(1:3,testp) = (/ 0., sqrt(en(2)/pmassi), 0./)
+
+       ! particle 2:
+       testpp = mergelist(inodeparts(inoderange(1,icell) + 1))
+       xyzh(1:3,testpp) = -xyzh(1:3,testp)
+       vxyzu(1:3,testpp) = -vxyzu(1:3,testp)
+
+       xyzh(1:3,testp)   = xyzh(1:3,testp)   + pos_com(:)
+       xyzh(1:3,testpp)  = xyzh(1:3,testpp)  + pos_com(:)
+       vxyzu(1:3,testp)  = vxyzu(1:3,testp)  + vel_com(:)
+       vxyzu(1:3,testpp) = vxyzu(1:3,testpp) + vel_com(:)
+
+       ! particle 3:
+       testp = mergelist(inodeparts(inoderange(1,icell) + 2))
+       xyzh(1:3,testp) = (/ 0., (am(1)/(2.*pmassi))/sqrt(en(3)/pmassi), 0./)
+       vxyzu(1:3,testp) = (/ 0., 0., sqrt(en(3)/pmassi)/)
+
+       ! particle 4:
+       testpp = mergelist(inodeparts(inoderange(1,icell) + 3))
+       xyzh(1:3,testpp) = -xyzh(1:3,testp)
+       vxyzu(1:3,testpp) = -vxyzu(1:3,testp)
+
+       xyzh(1:3,testp)   = xyzh(1:3,testp)   + pos_com(:)
+       xyzh(1:3,testpp)  = xyzh(1:3,testpp)  + pos_com(:)
+       vxyzu(1:3,testp)  = vxyzu(1:3,testp)  + vel_com(:)
+       vxyzu(1:3,testpp) = vxyzu(1:3,testpp) + vel_com(:) 
+       
+       ! particle 5:
+       testp = mergelist(inodeparts(inoderange(1,icell) + 4))
+       xyzh(1:3,testp) = (/ 0., 0., (am(2)/(2.*pmassi))/sqrt(en(1)/pmassi)/)
+       vxyzu(1:3,testp) = (/ sqrt(en(1)/pmassi), 0., 0. /)
+
+       ! particle 6:
+       testpp = mergelist(inodeparts(inoderange(1,icell) + 5))
+       xyzh(1:3,testpp) = -xyzh(1:3,testp)
+       vxyzu(1:3,testpp) = -vxyzu(1:3,testp)
+
+       xyzh(1:3,testp)   = xyzh(1:3,testp)   + pos_com(:)
+       xyzh(1:3,testpp)  = xyzh(1:3,testpp)  + pos_com(:)
+       vxyzu(1:3,testp)  = vxyzu(1:3,testp)  + vel_com(:)
+       vxyzu(1:3,testpp) = vxyzu(1:3,testpp) + vel_com(:)
+
     endif
 
  enddo over_cells

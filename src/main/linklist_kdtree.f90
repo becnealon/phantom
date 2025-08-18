@@ -153,7 +153,7 @@ subroutine get_distance_from_centre_of_mass(inode,xi,yi,zi,dx,dy,dz,xcen)
 
 end subroutine get_distance_from_centre_of_mass
 
-subroutine set_linklist(npart,nactive,xyzh,vxyzu,for_apr)
+subroutine set_linklist(npart,nactive,xyzh,vxyzu,apr_level,for_apr)
  use io,           only:nprocs
  use dtypekdtree,  only:ndimtree
  use kdtree,       only:maketree,maketreeglobal
@@ -164,6 +164,7 @@ subroutine set_linklist(npart,nactive,xyzh,vxyzu,for_apr)
  integer,           intent(in)    :: nactive
  real,              intent(inout) :: xyzh(:,:)
  real,              intent(in)    :: vxyzu(:,:)
+ integer(kind=1),   intent(inout) :: apr_level(:)
  logical, optional, intent(in)    :: for_apr
  logical :: apr_tree
 
@@ -182,16 +183,16 @@ subroutine set_linklist(npart,nactive,xyzh,vxyzu,for_apr)
  if (mpi .and. nprocs > 1) then
     if (use_sinktree) then
        call maketreeglobal(nodeglobal,node,nodemap,globallevel,refinelevels,xyzh,npart,ndimtree,cellatid,ifirstincell,ncells,&
-                           apr_tree,nptmass,xyzmh_ptmass)
+                           apr_level,apr_tree,nptmass,xyzmh_ptmass)
     else
        call maketreeglobal(nodeglobal,node,nodemap,globallevel,refinelevels,xyzh,npart,ndimtree,cellatid,ifirstincell,ncells,&
-                           apr_tree)
+                           apr_level,apr_tree)
     endif
  else
     if (use_sinktree) then
-       call maketree(node,xyzh,npart,ndimtree,ifirstincell,ncells,apr_tree,nptmass=nptmass,xyzmh_ptmass=xyzmh_ptmass)
+       call maketree(node,xyzh,npart,ndimtree,ifirstincell,ncells,apr_level,apr_tree,nptmass=nptmass,xyzmh_ptmass=xyzmh_ptmass)
     else
-       call maketree(node,xyzh,npart,ndimtree,ifirstincell,ncells,apr_tree)
+       call maketree(node,xyzh,npart,ndimtree,ifirstincell,ncells,apr_level,apr_tree)
     endif
  endif
 

@@ -31,14 +31,15 @@ contains
 !----------------------------------------------------------------
 subroutine sort_part
  use io,       only:iprint,fatal
- use part,     only:reorder_particles,npart,ll,xyzh,vxyzu,isdead
+ use part,     only:reorder_particles,npart,ll,xyzh,vxyzu,&
+                    isdead,apr_level
  use linklist, only:set_linklist,ncells,ifirstincell
  integer         :: i,ipart,iprev,ifirst
  integer(kind=8) :: icell
  real            :: t0,t1,t2
 
  call cpu_time(t0)
- call set_linklist(npart,npart,xyzh,vxyzu)  ! don't include MPI ghosts
+ call set_linklist(npart,npart,xyzh,vxyzu,apr_level)  ! don't include MPI ghosts
  call cpu_time(t1)
  write(iprint,*) '> sorting particles...',t1-t0,'s for linklist'
 

@@ -32,7 +32,8 @@ subroutine test_link(ntests,npass)
  use dim,      only:maxp,periodic
  use io,       only:id,master,nprocs!,iverbose
  use mpiutils, only:reduceall_mpi
- use part,     only:npart,npartoftype,massoftype,xyzh,vxyzu,hfact,igas,kill_particle
+ use part,     only:npart,npartoftype,massoftype,xyzh,vxyzu,hfact,igas,&
+                    kill_particle,apr_level
  use kernel,   only:radkern2,radkern
  use unifdis,  only:set_unifdis
  use timing,   only:getused
@@ -170,7 +171,7 @@ subroutine test_link(ntests,npass)
 !--setup the link list
 !
     if (id==master) write(*,"(/,1x,2(a,i1),a,/)") 'Test ',itest,' of ',nlinktest,': building linked list...'
-    call set_linklist(npart,npart,xyzh,vxyzu)
+    call set_linklist(npart,npart,xyzh,vxyzu,apr_level)
 !
 !--count dead particles
 !
@@ -430,7 +431,7 @@ subroutine test_link(ntests,npass)
     npartoftype(:) = 0
     npartoftype(igas) = npart
 
-    call set_linklist(npart,npart,xyzh,vxyzu)
+    call set_linklist(npart,npart,xyzh,vxyzu,apr_level)
     !
     !--check that the number of cells is non-zero
     !

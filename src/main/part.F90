@@ -1411,7 +1411,8 @@ subroutine combine_two_particles(keep,discard)
  factor = 0.5
 
  xyzh(:,keep)  = 0.5*(xyzh(:,keep) + xyzh(:,discard))
- treecache(:,keep)  = 0.5*(treecache(:,keep) + treecache(:,discard))
+ treecache(1:4,keep)  = 0.5*(treecache(1:4,keep) + treecache(1:4,discard))
+ treecache(5,keep) = treecache(5,keep)  - int(1,kind=1)
  vxyzu(:,keep) = 0.5*(vxyzu(:,keep) + vxyzu(:,discard))
  if (maxan==maxp) then
     vpred(:,keep) = 0.5*(vpred(:,keep) + vpred(:,discard))

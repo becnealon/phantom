@@ -786,7 +786,7 @@ subroutine construct_node(nodeentry, nnode, mymum, level, xmini, xmaxi, npnode, 
 #endif
 
  wassplit = (npnodetot > minpart)
- if (apr_tree) wassplit = (npnode > 2)
+ if (apr_tree) wassplit = (npnode > 12)
 
  if (.not. wassplit) then
     nodeentry%leftchild  = 0
@@ -1016,10 +1016,10 @@ subroutine special_sort_particles_in_cell(iaxis,imin,imax,min_l,max_l,min_r,max_
  real :: xyzh_swap(5),dpivot(npnode)
 
  dpivot = 0.0
- nchild_in = 2
+ nchild_in = 12
 
  if (modulo(npnode,nchild_in) > 0) then
-    call error('apr sort','number of particles sent in to kdtree is not divisible by 2')
+    call error('apr sort','number of particles sent in to kdtree is not divisible by 12')
  endif
 
 ! print*,'nnode ',imin,imax,npnode,' pivot = ',iaxis,xpivot

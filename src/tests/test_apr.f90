@@ -35,19 +35,19 @@ subroutine test_apr(ntests,npass)
  use unifdis,      only:set_unifdis
  use boundary,     only:dxbound,dybound,dzbound,xmin,xmax,ymin,ymax,zmin,zmax
  use part,         only:npart,npartoftype,hfact,xyzh,init_part,massoftype,radprop
-use part,         only:isetphase,igas,iphase,vxyzu,fxyzu,apr_level,maxvxyzu
+ use part,         only:isetphase,igas,iphase,vxyzu,fxyzu,apr_level,maxvxyzu
  use mpidomain,    only:i_belong
  use mpiutils,     only:reduceall_mpi
  use dim,          only:periodic,use_apr,do_radiation
  use apr,          only:update_apr
- use utils_apr,    only:apr_centre
+ use utils_apr,    only:apr_centre,apr_max
  use energies,     only:compute_energies,angtot,etot,totmom,ekin,etherm
  use random,       only:ran2
  integer, intent(inout) :: ntests,npass
  real :: psep,rhozero,time,totmass, etotin, totmomin
  real :: angtotin, ekinin, ethermin
  real :: tolang, tolen, tolmom
- integer :: original_npart,splitted,nfailed(7),i,iseed
+ integer :: original_npart,splitted,nfailed(11),i,iseed,tolpart
 
  if (use_apr) then
     if (id==master) write(*,"(/,a)") '--> TESTING APR MODULE'
@@ -58,7 +58,7 @@ use part,         only:isetphase,igas,iphase,vxyzu,fxyzu,apr_level,maxvxyzu
 
  ! Tolerances
  tolmom = 2.e-15
- tolang = 8.0e-14
+ tolang = 2.0e-14
  tolen  = 2.e-15
  nfailed(:) = 0
  iseed = -92757
@@ -82,8 +82,6 @@ use part,         only:isetphase,igas,iphase,vxyzu,fxyzu,apr_level,maxvxyzu
  if (do_radiation) then
     radprop(4,:) = 23.0421 ! just some inconsequential number
  endif
-
-! phases are set explicitly via isetphase/iphase in the APR tests
 
  ! Set some random velocities
  do i=1,npart
@@ -109,6 +107,8 @@ use part,         only:isetphase,igas,iphase,vxyzu,fxyzu,apr_level,maxvxyzu
  apr_centre(1:2,1) = 0.25    ! this puts a sphere centred at (0.25,0.25)
  apr_centre(1:2,2) = -0.25   ! and a second sphere at (-0.25,-0.25)
  apr_centre(3,1:2) = 0.      ! and ensures they are in the plane
+ ! move the second region just for testing
+ apr_centre(1:3,2) = 20.
  call update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
 
  ! Check the new conserved values
@@ -130,15 +130,16 @@ use part,         only:isetphase,igas,iphase,vxyzu,fxyzu,apr_level,maxvxyzu
 
  ! Check the new conserved values
  call compute_energies(0.)
- !call checkval(angtot,angtotin,tolang,nfailed(1),'angular momentum')
- call checkval(totmom,totmomin,tolmom,nfailed(5),'linear momentum')
- !call checkval(etot,etotin,tolen,nfailed(3),'total energy')
- !call checkval(ekin,ekinin,tolen,nfailed(4),'kinetic energy')
- call checkval(etherm,ethermin,tolen,nfailed(6),'thermal energy')
+ call checkval(angtot,angtotin,tolang,nfailed(6),'angular momentum')
+ call checkval(totmom,totmomin,tolmom,nfailed(7),'linear momentum')
+ call checkval(etot,etotin,tolen,nfailed(8),'total energy')
+ call checkval(ekin,ekinin,tolen,nfailed(9),'kinetic energy')
+ call checkval(etherm,ethermin,tolen,nfailed(10),'thermal energy')
 
  ! Check that the original particle number returns
- call checkval(npart,original_npart,0,nfailed(7),'number of particles == original number')
- call update_test_scores(ntests,nfailed(5:7),npass)
+ tolpart = (apr_max-1)*6 ! this corresponds to a maximum of 11 "spare" particles per level
+ call checkval(npart,original_npart,tolpart,nfailed(11),'number of particles conserved')
+ call update_test_scores(ntests,nfailed,npass)
 
  if (id==master) write(*,"(/,a)") '<-- APR TEST COMPLETE'
 
@@ -151,7 +152,7 @@ end subroutine test_apr
 !--------------------------------------------
 subroutine setup_apr_region_for_test()
  use apr,        only:init_apr,update_apr
- use utils_apr,  only:apr_type,apr_rad,apr_max_in,ref_dir,ntrack
+ use utils_apr,  only:apr_type,apr_rad,apr_max_in,ref_dir,ntrack,split_dir
  use part,       only:apr_level
  integer :: ierr
 
@@ -163,6 +164,7 @@ subroutine setup_apr_region_for_test()
  apr_type    =  -1     ! choose this so you get the default option which is reserved for the test suite
  apr_rad     =   0.2   ! radius of innermost region
  ntrack      =   2     ! number of regions to track
+ split_dir   =   1     ! we only test random split directions as we use multiple regions
 
  ! initialise
  call init_apr(apr_level,ierr)

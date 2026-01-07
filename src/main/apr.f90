@@ -521,6 +521,7 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
  use dim,           only:ind_timesteps,maxvxyzu
  use get_apr_level, only:get_apr
  use physcon,       only:pi
+ use utils_apr,     only:apr_centre
  use vectorutils, only:cross_product3D
  integer,         intent(inout) :: nmerge,nkilled,nrelax,relaxlist(:),npartnew
  integer(kind=1), intent(inout) :: apr_level(:)
@@ -529,9 +530,10 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
  real,            intent(inout) :: xyzh_merge(:,:),vxyzu_merge(:,:)
  integer :: remainder,icell,n_cell,apri,m,i
  integer :: eldest,tuther,testp,testpp,n
- real    :: com(3),pmassi,xcom(3),vcom(3),ex,ey,ez,xyzh_rot(3)
+ real    :: com(3),pmassi,xyzh_fromicentre(3),xcom(3),vcom(3)
+ real    :: r_ave,phi_ave,theta_ave,r_part,phi_part,ex,ey,ez,xyzh_rot(3)
  real    :: pos_com(3),vel_com(3),am(3),ogen(3),ogam(3),vxyzu_rot(3),en(3),am_term(3)
- logical :: zero_vel
+ logical :: spherical,zero_vel
  type(cellforce)        :: cell
 
  ! First ensure that we're only sending in groups of 12 to the tree
@@ -550,9 +552,40 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
     if (leaf_is_active(icell) == 0) cycle over_cells !--skip empty cells
     n_cell = inoderange(2,icell)-inoderange(1,icell)+1
 
-    ! find out where centre of cell is (in cartesian coordinates)
-    call get_cell_location(icell,cell%xpos,cell%xsizei,cell%rcuti)
-    com(1:3) = cell%xpos(1:3)
+    spherical = .false.
+    if (.not.spherical) then
+    ! if not using spherical coordinates to check the cell location, just use existing info
+      call get_cell_location(icell,cell%xpos,cell%xsizei,cell%rcuti)
+      com(1:3) = cell%xpos(1:3)
+    else
+      ! if spherical chosen, calculated the com in spherical coordinates and check
+      ! if that is within the boundary or not (convert back to cartesian com later on)
+      r_ave = 0.
+      theta_ave = 0.
+      phi_ave = 0.
+      ! spherically average the position of the particles around the current APR region
+      do m = 1,n_cell
+         i = inodeparts(inoderange(1,icell) + m - 1)
+         xyzh_fromicentre(1:3) = xyzh_merge(1:3,i) - apr_centre(1:3,icentre)
+         !print*,i,xyzh_merge(1:3,i)
+         r_part = sqrt(dot_product(xyzh_fromicentre(1:3),xyzh_fromicentre(1:3)))
+         r_ave = r_ave + r_part
+         theta_ave = theta_ave + acos(xyzh_fromicentre(3)/r_part)
+         phi_part = atan2(xyzh_fromicentre(2),xyzh_fromicentre(1))
+         !if (phi_ave < 0.) phi_ave = phi_ave + 2.*pi
+         phi_ave = phi_ave + phi_part
+      enddo
+      r_ave = r_ave/real(n_cell)
+      theta_ave = theta_ave/real(n_cell)
+      phi_ave = phi_ave/real(n_cell)
+
+      ! now convert back to cartesian equivalents
+      com(1) = r_ave*sin(theta_ave)*cos(phi_ave)
+      com(2) = r_ave*sin(theta_ave)*sin(phi_ave)
+      com(3) = r_ave*cos(theta_ave)
+      com(:) = com(:) + apr_centre(1:3,icentre) ! for sending back into get_apr
+    endif
+
     call get_apr(com(1:3),icentre,apri)
 
     ! If the apr level based on the com is lower than the current level,

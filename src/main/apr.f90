@@ -546,13 +546,11 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
  ! Now use the centre of mass of each cell to check whether it should
  ! be merged or not
  com = 0.
- pmassi = aprmassoftype(igas,apr_level(1)) ! this *current* mass is correct
-                                           ! because only particles to merge are sent in
  over_cells: do icell=1,int(ncells)
     if (leaf_is_active(icell) == 0) cycle over_cells !--skip empty cells
     n_cell = inoderange(2,icell)-inoderange(1,icell)+1
 
-    spherical = .false.
+    spherical = .true.
     if (.not.spherical) then
     ! if not using spherical coordinates to check the cell location, just use existing info
       call get_cell_location(icell,cell%xpos,cell%xsizei,cell%rcuti)
@@ -593,6 +591,9 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
     if (apri < current_apr) then
       ! here we take 12 particles from each leaf in the tree and combine these into six new particles
       ! the new particles are constructed to conserve the average properties of the children
+
+      pmassi = aprmassoftype(igas,apr_level(inodeparts(inoderange(1,icell)))) ! this *current* mass is correct
+                                           ! because only particles to merge are sent in
 
       ! start by calculating (or using) the average properties of the 12 children
       pos_com = 0.

@@ -533,8 +533,8 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
  real    :: com(3),pmassi,xyzh_fromicentre(3),xcom(3),vcom(3)
  real    :: r_ave,phi_ave,theta_ave,r_part,phi_part,ex,ey,ez,xyzh_rot(3)
  real    :: pos_com(3),vel_com(3),am(3),ogen(3),ogam(3),vxyzu_rot(3),en(3),am_term(3)
- logical :: spherical,zero_vel
- type(cellforce)        :: cell
+ logical :: spherical,zero_vel,random_rotate
+ type(cellforce) :: cell
 
  ! First ensure that we're only sending in groups of 12 to the tree
  remainder = modulo(nmerge,12)
@@ -675,6 +675,7 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
        ! if .not.zero_vel, need to do clever merging
        ! to construct the properties we want (in the com frame first, then edit to simulation frame)
        ! particle 1:
+      random_rotate = .true.
       if (.not.zero_vel) then
        testp = mergelist(inodeparts(inoderange(1,icell)))
        xyzh(1:3,testp) = (/ (am(3)/(2.*pmassi))/sqrt(en(2)/pmassi), 0., 0./)
@@ -684,6 +685,11 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
        testpp = mergelist(inodeparts(inoderange(1,icell) + 1))
        xyzh(1:3,testpp) = -xyzh(1:3,testp)
        vxyzu(1:3,testpp) = -vxyzu(1:3,testp)
+
+       if (random_rotate) then
+         call rotate_part(xyzh(1:3,testp),vxyzu(1:3,testp))
+         call rotate_part(xyzh(1:3,testpp),vxyzu(1:3,testpp))
+       endif
 
        xyzh(1:3,testp)   = xyzh(1:3,testp)   + pos_com(:)
        xyzh(1:3,testpp)  = xyzh(1:3,testpp)  + pos_com(:)
@@ -704,6 +710,11 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
        xyzh(1:3,testpp)  = xyzh(1:3,testpp)  + pos_com(:)
        vxyzu(1:3,testp)  = vxyzu(1:3,testp)  + vel_com(:)
        vxyzu(1:3,testpp) = vxyzu(1:3,testpp) + vel_com(:)
+
+       if (random_rotate) then
+         call rotate_part(xyzh(1:3,testp),vxyzu(1:3,testp))
+         call rotate_part(xyzh(1:3,testpp),vxyzu(1:3,testpp))
+       endif
        
        ! particle 5:
        testp = mergelist(inodeparts(inoderange(1,icell) + 4))
@@ -719,6 +730,12 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
        xyzh(1:3,testpp)  = xyzh(1:3,testpp)  + pos_com(:)
        vxyzu(1:3,testp)  = vxyzu(1:3,testp)  + vel_com(:)
        vxyzu(1:3,testpp) = vxyzu(1:3,testpp) + vel_com(:)
+
+       if (random_rotate) then
+         call rotate_part(xyzh(1:3,testp),vxyzu(1:3,testp))
+         call rotate_part(xyzh(1:3,testpp),vxyzu(1:3,testpp))
+       endif
+
       endif
 
    endif
@@ -726,6 +743,35 @@ subroutine merge_with_special_tree(nmerge,mergelist,xyzh_merge,vxyzu_merge,curre
  enddo over_cells
 
 end subroutine merge_with_special_tree
+
+!-----------------------------------------------------------------------
+!+
+!  Rotate positions and velocities by angles around x, y and z
+!+
+!-----------------------------------------------------------------------
+ subroutine rotate_part(pos,vel)
+  use physcon,  only:pi
+  use vectorutils, only:rotatevec
+  use random,         only:ran2
+  real, intent(inout) :: pos(3), vel(3)
+  real :: a,b,c
+  integer :: iseed
+
+  iseed = -83765629
+
+  ! set the angles randomly
+  a = ran2(iseed) * 2.*pi
+  b = ran2(iseed) * 2.*pi
+  c = ran2(iseed) * 2.*pi
+  
+  call rotatevec(pos,(/0.,0.,1./),a)
+  call rotatevec(pos,(/0.,1.,0./),b)
+  call rotatevec(pos,(/1.,0.,0./),c)
+  call rotatevec(vel,(/0.,0.,1./),a)
+  call rotatevec(vel,(/0.,1.,0./),b)
+  call rotatevec(vel,(/1.,0.,0./),c)
+
+ end subroutine rotate_part
 
 !-----------------------------------------------------------------------
 !+

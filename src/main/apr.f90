@@ -277,7 +277,7 @@ subroutine update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
        enddo merge_over_active
        if (apr_verbose) print*,nmerge,'particles selected for merge'
        ! Now send them to be merged
-       if (nmerge > 1) call merge_with_special_tree(nmerge,mergelist(1:nmerge),xyzh_merge(:,1:nmerge),&
+       if (nmerge > 11) call merge_with_special_tree(nmerge,mergelist(1:nmerge),xyzh_merge(:,1:nmerge),&
                                             vxyzu_merge(:,1:nmerge),kk,xyzh,vxyzu,apr_level,nkilled,&
                                             nrelax,relaxlist,npartnew)
        nmerge_total = nmerge_total + nkilled ! actually merged

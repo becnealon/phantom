@@ -41,7 +41,7 @@ module utils_apr
  real, allocatable :: apr_regions(:), apr_centre(:,:)
  real, save :: apr_H(2,100)  ! we enforce this to be 100
  real, allocatable :: entropy_stored(:)
- integer, allocatable :: entropy_list(:)
+ integer(kind=8), allocatable :: entropy_list(:)
  integer :: entropy_count
 
  logical :: apr_region_is_circle = .false.
@@ -269,8 +269,9 @@ subroutine adjust_entropy(xyzh,vxyzu,apr_level,eos_vars)
 
 
  do i = 1, entropy_count
-    if (entropy_list(i) < 0) continue
+    if (entropy_list(i) < 0) cycle
     ii = findloc(iorig,entropy_list(i),dim=1) ! this is the actual particle number
+    if (ii==0) cycle
     pmassi = aprmassoftype(igas,apr_level(ii))
     rhoi = rhoh(xyzh(4,ii),pmassi)
     eos_vars(igasP,ii) = entropy_stored(i)*rhoi**(gamma)/pmassi       ! reset Pressure

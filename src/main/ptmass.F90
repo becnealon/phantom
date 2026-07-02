@@ -2542,22 +2542,36 @@ subroutine ptmass_calc_enclosed_mass(nptmass,npart,xyzh)
     z0 = xyzmh_ptmass(3,i)
     hsoft21 = 1./xyzmh_ptmass(ihsoft,i)**2
 
-    !$omp parallel do default (none) &
-    !$omp reduction(+:wi) &
-    !$omp shared(npart,xyzh,x0,y0,z0,i,hsoft21,isink_heating) &
-    !$omp private(j,q2)
-    do j = 1,npart
-       if (.not. isdead_or_accreted(xyzh(4,j))) then
-          q2 = ((xyzh(1,j)-x0)**2 + (xyzh(2,j)-y0)**2 + (xyzh(3,j)-z0)**2)*hsoft21
-          if (q2 < radkern2) wi = wi + heating_kernel(q2,isink_heating)  ! wj = 1 for uniform heating
-       endif
-    enddo
-    !$omp end parallel do
     if (use_apr) then
-       xyzmh_ptmass(imassenc,i) = wi * aprmassoftype(igas,apr_level(i))
+      !$omp parallel do default (none) &
+      !$omp reduction(+:wi) &
+      !$omp shared(npart,xyzh,x0,y0,z0,i,hsoft21,isink_heating,aprmassoftype,apr_level) &
+      !$omp private(j,q2)
+      do j = 1,npart
+         if (.not. isdead_or_accreted(xyzh(4,j))) then
+            q2 = ((xyzh(1,j)-x0)**2 + (xyzh(2,j)-y0)**2 + (xyzh(3,j)-z0)**2)*hsoft21
+            if (q2 < radkern2) then
+               wi = wi + heating_kernel(q2,isink_heating) * aprmassoftype(igas,apr_level(j))  ! wj = 1 for uniform heating
+            endif
+         endif
+      enddo
+      !$omp end parallel do
+      xyzmh_ptmass(imassenc,i) = wi
     else
-       xyzmh_ptmass(imassenc,i) = wi * massoftype(igas)
+      !$omp parallel do default (none) &
+      !$omp reduction(+:wi) &
+      !$omp shared(npart,xyzh,x0,y0,z0,i,hsoft21,isink_heating) &
+      !$omp private(j,q2)
+      do j = 1,npart
+         if (.not. isdead_or_accreted(xyzh(4,j))) then
+            q2 = ((xyzh(1,j)-x0)**2 + (xyzh(2,j)-y0)**2 + (xyzh(3,j)-z0)**2)*hsoft21
+            if (q2 < radkern2) wi = wi + heating_kernel(q2,isink_heating)  ! wj = 1 for uniform heating
+         endif
+      enddo
+      !$omp end parallel do
+      xyzmh_ptmass(imassenc,i) = wi * massoftype(igas)
     endif
+
     if (wi == 0.) then   ! wi will be exactly zero if hasn't been touched
        call error('ptmass','Zero enclosed mass for a sink particle - heating from this sink will not be calculated properly')
     endif

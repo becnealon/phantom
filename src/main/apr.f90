@@ -347,9 +347,9 @@ end subroutine update_apr
 subroutine splitpart(i,npartnew)
  use part,         only:copy_particle_all,apr_level,xyzh,vxyzu,npartoftype,igas,dens, &
                         set_particle_type,metrics,metricderivs,fext,pxyzu,eos_vars,itemp, &
-                        igamma,igasP,aprmassoftype
+                        igamma,igasP,aprmassoftype,poten
  use physcon,      only:pi
- use dim,          only:ind_timesteps
+ use dim,          only:ind_timesteps,gravity
  use random,       only:ran2
  use vectorutils, only:cross_product3D,rotatevec
  use utils_apr,  only:apr_region_is_circle,icentre
@@ -520,6 +520,10 @@ subroutine splitpart(i,npartnew)
        xyzh(4,i) = xyzh(4,i)*(0.5**(1./3.))
        if (ind_timesteps) call put_in_smallest_bin(i)
     endif
+ endif
+ if (gravity) then
+    poten(i) = poten(i)*0.5    ! to conserve energy
+    poten(npartnew) = poten(npartnew)*0.5
  endif
 end subroutine splitpart
 

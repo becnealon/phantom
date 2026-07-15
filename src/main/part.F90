@@ -1452,7 +1452,7 @@ subroutine combine_two_particles(keep,discard)
  if (maxalpha ==maxp) alphaind(:,keep) = factor*(alphaind(:,keep) + alphaind(:,discard))
  if (maxgradh ==maxp) gradh(:,keep) = factor*(gradh(:,keep) + gradh(:,discard))
  if (maxphase ==maxp .and. (iphase(keep) /= iphase(discard))) make_warning = .true.
- if (maxgrav  ==maxp) poten(keep) = factor*(poten(keep) + poten(discard))
+ if (maxgrav  ==maxp) poten(keep) = poten(keep) + poten(discard)
  if (maxlum   ==maxp) luminosity(keep) = factor*(luminosity(keep) + luminosity(discard))
  if (maxindan==maxp) then
     ibin(keep)       = min(ibin(keep), ibin(discard))

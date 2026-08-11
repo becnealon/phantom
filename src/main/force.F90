@@ -1177,7 +1177,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
  rho21i = rho1i*rho1i
  mrhoi5  = 0.5*pmassi*rho1i
  !avterm  = mrhoi5*alphai       !  artificial viscosity parameter
- auterm  = mrhoi5*alphau       !  artificial thermal conductivity parameter
+ auterm  = 0.5*rho1i*alphau       !  artificial thermal conductivity parameter (mass weighting with pmassj applied in the pair loop)
  avBterm = mrhoi5*alphaB*rho1i
 !
 !--initialise the following to zero for the case
@@ -1359,7 +1359,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
           pmassj = massoftype(iamtypej)
        endif
 
-       fgrav = 0.5*(pmassj*fgravi + pmassi*fgravj)
+       fgrav = 0.5*pmassj*(fgravi + fgravj)
 
        !--get dv : needed for timestep and av term
        vxj = vxyzu(1,j)
@@ -1486,7 +1486,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
                         realviscosity,divvj,bulkvisc,dvdxj,stressmax,radPj)
 
              mrhoj5   = 0.5*pmassj*rho1j
-             autermj  = mrhoj5*alphau
+             autermj  = 0.5*rho1j*alphau ! mass weighting with pmassj applied in the pair loop
              avBtermj = mrhoj5*alphaB*rho1j
 
              if (gr) then
@@ -1614,7 +1614,8 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
                 rhoav1 = 2./(rhoi + rhoj)
                 vsigu = sqrt(abs(pri - prj)*rhoav1)
              endif
-             dendissterm = vsigu*denij*(auterm*grkerni + autermj*grkernj)
+             ! pmassj weighting is required for energy conservation with unequal particle masses (e.g. APR)
+             dendissterm = vsigu*denij*pmassj*(auterm*grkerni + autermj*grkernj)
           else
              dendissterm = 0.
           endif
@@ -1715,7 +1716,7 @@ subroutine compute_forces(i,iamgasi,iamdusti,xpartveci,hi,hi1,hi21,hi41,gradhi,g
           endif
 
           !--calculate divv for use in du, h prediction, av switch etc.
-          fsum(idrhodti) = fsum(idrhodti) + projv*grkerni
+          fsum(idrhodti) = fsum(idrhodti) + pmassj*projv*grkerni
 
           if (maxvxyzu >= 4 .or. track_lum) then
              !--viscous heating
@@ -2948,7 +2949,7 @@ subroutine finish_cell_and_store_results(icall,cell,fxyzu,xyzh,vxyzu,poten,dt,dv
        fonrmaxi   = fsum(ifonrmaxi)
     endif
 
-    drhodti = pmassi*fsum(idrhodti)
+    drhodti = fsum(idrhodti)
 
     isgas: if (iamgasi) then
        divvi = -drhodti*rho1i

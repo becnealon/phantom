@@ -1412,7 +1412,7 @@ subroutine combine_two_particles(keep,discard)
 
  xyzh(:,keep)  = 0.5*(xyzh(:,keep) + xyzh(:,discard))
  treecache(1:4,keep)  = 0.5*(treecache(1:4,keep) + treecache(1:4,discard))
- treecache(5,keep) = treecache(5,keep)  - int(1,kind=1)
+ treecache(5,keep) = treecache(5,keep)*2
  vxyzu(:,keep) = 0.5*(vxyzu(:,keep) + vxyzu(:,discard))
  if (maxan==maxp) then
     vpred(:,keep) = 0.5*(vpred(:,keep) + vpred(:,discard))
@@ -1452,7 +1452,7 @@ subroutine combine_two_particles(keep,discard)
  if (maxalpha ==maxp) alphaind(:,keep) = factor*(alphaind(:,keep) + alphaind(:,discard))
  if (maxgradh ==maxp) gradh(:,keep) = factor*(gradh(:,keep) + gradh(:,discard))
  if (maxphase ==maxp .and. (iphase(keep) /= iphase(discard))) make_warning = .true.
- if (maxgrav  ==maxp) poten(keep) = factor*(poten(keep) + poten(discard))
+ if (maxgrav  ==maxp) poten(keep) = poten(keep) + poten(discard)
  if (maxlum   ==maxp) luminosity(keep) = factor*(luminosity(keep) + luminosity(discard))
  if (maxindan==maxp) then
     ibin(keep)       = min(ibin(keep), ibin(discard))

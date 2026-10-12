@@ -318,8 +318,8 @@ subroutine set_star_density(lattice,id,master,rmin,Rstar,Mstar,hfact,&
     msg = ''
     write(msg,"(a,i0,a,i0,a)") 'requested np = ',n,' cannot fit in the particle arrays '//&
          '(maxp = ',size(xyzh,dim=2) - npart,' free): rerun phantomsetup with a larger --maxp; '//&
-         'with APR ref_dir=-1 you probably want apr_start_coarse=T in the .in'//&
-         'and np1 set to the base count (finest count/2^apr_max), not the finest count'
+         'with APR ref_dir=-1 np1 should be the base count (finest count/2**apr_max), '//&
+         'as the relaxation automatically starts from the coarsest level and splits outward'
     call fatal('set_star_density',msg)
  endif
  !

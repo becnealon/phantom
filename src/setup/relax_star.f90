@@ -75,6 +75,8 @@ subroutine relax_star(nt,rhotab,pr,temp,r,npart,xyzh,use_var_comp,Xfrac,Yfrac,mu
  use io_summary,      only:summary_initialise
  use setstar_utils,   only:set_star_thermalenergy,set_star_composition
  use apr,             only:init_apr,update_apr
+ use utils_apr,       only:apr_start_coarse,split_dir,ref_dir,ntrack,ntrack_max
+ use get_apr_level,   only:set_get_apr
  use neighkdtree,     only:allocate_neigh
  integer,           intent(in)    :: nt,iptmass_core
  integer,           intent(inout) :: npart
@@ -89,6 +91,7 @@ subroutine relax_star(nt,rhotab,pr,temp,r,npart,xyzh,use_var_comp,Xfrac,Yfrac,mu
  real,              intent(out), optional :: density_error,energy_error
  real,              intent(in),  optional :: mtab(nt)
  integer :: nits,nerr,nwarn,iunit,i1
+ integer :: split_dir_in
  real    :: t,dt,dtmax,rmserr,rstar,mstar,tdyn,x0(3),mtot
  real    :: entrop(nt),utherm(nt),mr(nt),rmax,dtext,dtnew
  logical :: converged,use_step,restart
@@ -167,9 +170,27 @@ subroutine relax_star(nt,rhotab,pr,temp,r,npart,xyzh,use_var_comp,Xfrac,Yfrac,mu
 
  ! if using apr, options set in setup file but needs to be initialised here
  if (use_apr) then
+    if (ref_dir == -1) then
+       ! start from the most coarse level and then splitting them to save memory
+       apr_start_coarse = .true.
+       split_dir_in = split_dir    ! original input from the .in file
+       ! split direction as *random* for the first pass
+       ! (during which *every* particle will be split to the desired APR level)
+       split_dir = 3
+       if (id==master) print "(1x,a)",&
+             'APR: relaxing with ref_dir = -1: automatically setting apr_start_coarse = T and split_dir = 3 '//&
+             '(every particle starts at the coarsest level and split in random directions)'
+    endif
     call allocate_neigh
     call init_apr(apr_level,ierr)
     call update_apr(npart,xyzh,vxyzu,fxyzu,apr_level)
+    if (ref_dir == -1 .and. ntrack_max == 1) then
+       split_dir = split_dir_in
+       call set_get_apr() ! point the split-direction routine at the restored value
+       if (id==master) print "(1x,a,i0,a)",&
+             'APR: initial mapping of the particles done: restoring split_dir = ',split_dir,&
+             ' from the .in file for the rest of the relaxation'
+    endif
  endif
 
  !
